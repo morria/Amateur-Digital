@@ -77,6 +77,7 @@ struct MessageBubbleView: View {
                 // Message bubble
                 Text(message.content)
                     .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(bubbleColor)
