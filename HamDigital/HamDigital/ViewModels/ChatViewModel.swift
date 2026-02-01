@@ -14,6 +14,7 @@ class ChatViewModel: ObservableObject {
     @Published var selectedMode: DigitalMode = .rtty
     @Published var isTransmitting: Bool = false
     @Published var isListening: Bool = false
+    @Published var audioError: String?
 
     // MARK: - Services
     private let audioService: AudioService
@@ -52,13 +53,21 @@ class ChatViewModel: ObservableObject {
 
         // Start audio service
         Task {
-            do {
-                try await audioService.start()
-                isListening = audioService.isListening
-                print("[ChatViewModel] Audio service started, listening: \(isListening)")
-            } catch {
-                print("[ChatViewModel] Failed to start audio: \(error)")
-            }
+            await startAudioService()
+        }
+    }
+
+    /// Start or restart the audio service
+    func startAudioService() async {
+        do {
+            try await audioService.start()
+            isListening = audioService.isListening
+            audioError = nil
+            print("[ChatViewModel] Audio service started, listening: \(isListening)")
+        } catch {
+            let errorMsg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            audioError = errorMsg
+            print("[ChatViewModel] Failed to start audio: \(errorMsg)")
         }
     }
 

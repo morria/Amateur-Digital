@@ -53,11 +53,14 @@ class AudioService: ObservableObject, @unchecked Sendable {
 
     /// Start audio engine and configure for playback
     func start() async throws {
-        // Configure audio session
-        // Don't use .defaultToSpeaker - we want audio to go to connected USB audio devices (radio)
+        // Configure audio session for external audio devices (USB soundcards, headphones)
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, options: [.allowBluetoothA2DP])
-        try session.setActive(true)
+        // Use .allowBluetooth for headsets, don't use .defaultToSpeaker so USB devices work
+        try session.setCategory(.playAndRecord, mode: .default, options: [.allowBluetooth, .allowBluetoothA2DP])
+        try session.setPreferredSampleRate(48000)
+        try session.setActive(true, options: .notifyOthersOnDeactivation)
+
+        print("[AudioService] Audio session configured, current route: \(session.currentRoute)")
 
         // Create audio engine
         let engine = AVAudioEngine()
@@ -98,13 +101,21 @@ class AudioService: ObservableObject, @unchecked Sendable {
         }
 
         // Start the engine
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            print("[AudioService] Failed to start engine: \(error)")
+            self.audioEngine = nil
+            self.playerNode = nil
+            throw error
+        }
 
         isConnected = true
         isListening = true
         updateDeviceNames()
 
-        print("[AudioService] Started with sample rate: \(sampleRate) Hz, listening for input")
+        print("[AudioService] Started with sample rate: \(sampleRate) Hz")
+        print("[AudioService] Input: \(inputDeviceName), Output: \(outputDeviceName)")
     }
 
     /// Handle audio input from tap (nonisolated to satisfy Sendable requirement)
@@ -378,11 +389,12 @@ enum AudioServiceError: Error, LocalizedError {
     case encodingFailed
     case playbackFailed
     case playbackCancelled
+    case startupFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .notConnected:
-            return "Audio not connected"
+            return "Audio not started"
         case .engineNotRunning:
             return "Audio engine stopped"
         case .formatError:
@@ -393,6 +405,8 @@ enum AudioServiceError: Error, LocalizedError {
             return "Playback failed"
         case .playbackCancelled:
             return "Cancelled"
+        case .startupFailed(let reason):
+            return "Audio failed: \(reason)"
         }
     }
 }

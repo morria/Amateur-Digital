@@ -28,6 +28,26 @@ struct ChannelListView: View {
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 40)
+                    } else if let error = viewModel.audioError {
+                        // Audio error
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 48))
+                            .foregroundColor(.orange)
+                        Text("Audio Error")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        Text(error)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+                        Button("Retry") {
+                            Task {
+                                await viewModel.startAudioService()
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .padding(.top, 8)
                     } else {
                         // Not listening yet
                         Image(systemName: "waveform.slash")
