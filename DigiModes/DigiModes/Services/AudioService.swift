@@ -121,15 +121,31 @@ class AudioService: ObservableObject {
 
             player.scheduleBuffer(playableBuffer) { [weak self] in
                 DispatchQueue.main.async {
-                    self?.isPlaying = false
-                    self?.playbackContinuation?.resume(returning: ())
-                    self?.playbackContinuation = nil
+                    guard let self = self else { return }
+                    self.isPlaying = false
+                    // Only resume if continuation hasn't been consumed by stopPlayback
+                    if self.playbackContinuation != nil {
+                        self.playbackContinuation?.resume(returning: ())
+                        self.playbackContinuation = nil
+                    }
                 }
             }
 
             if !player.isPlaying {
                 player.play()
             }
+        }
+    }
+
+    /// Stop current playback immediately
+    func stopPlayback() {
+        playerNode?.stop()
+        isPlaying = false
+
+        // Cancel the waiting continuation
+        if let continuation = playbackContinuation {
+            continuation.resume(throwing: AudioServiceError.playbackCancelled)
+            playbackContinuation = nil
         }
     }
 
@@ -263,6 +279,7 @@ enum AudioServiceError: Error, LocalizedError {
     case notConnected
     case formatError
     case playbackFailed
+    case playbackCancelled
 
     var errorDescription: String? {
         switch self {
@@ -272,6 +289,8 @@ enum AudioServiceError: Error, LocalizedError {
             return "Audio format error"
         case .playbackFailed:
             return "Audio playback failed"
+        case .playbackCancelled:
+            return "Playback was cancelled"
         }
     }
 }

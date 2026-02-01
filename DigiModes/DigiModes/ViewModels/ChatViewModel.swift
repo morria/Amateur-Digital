@@ -37,6 +37,10 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Transmission State
+    private var currentTransmissionChannelIndex: Int?
+    private var currentTransmissionMessageIndex: Int?
+
     // MARK: - Public Methods
 
     func sendMessage(_ content: String, toChannel channel: Channel) {
@@ -55,6 +59,24 @@ class ChatViewModel: ObservableObject {
 
         // Start transmission
         transmitMessage(at: channels[index].messages.count - 1, inChannelAt: index)
+    }
+
+    /// Stop current transmission
+    func stopTransmission() {
+        print("[ChatViewModel] Stopping transmission")
+        audioService.stopPlayback()
+
+        // Mark current message as failed
+        if let channelIndex = currentTransmissionChannelIndex,
+           let messageIndex = currentTransmissionMessageIndex,
+           channelIndex < channels.count,
+           messageIndex < channels[channelIndex].messages.count {
+            channels[channelIndex].messages[messageIndex].transmitState = .failed
+        }
+
+        isTransmitting = false
+        currentTransmissionChannelIndex = nil
+        currentTransmissionMessageIndex = nil
     }
 
     func clearChannel(_ channel: Channel) {
@@ -97,6 +119,10 @@ class ChatViewModel: ObservableObject {
 
         let text = channels[channelIndex].messages[messageIndex].content
 
+        // Track current transmission
+        currentTransmissionChannelIndex = channelIndex
+        currentTransmissionMessageIndex = messageIndex
+
         Task {
             // Mark as transmitting
             channels[channelIndex].messages[messageIndex].transmitState = .transmitting
@@ -104,14 +130,21 @@ class ChatViewModel: ObservableObject {
 
             do {
                 try await performTransmission(text: text)
-                // Mark as sent
-                channels[channelIndex].messages[messageIndex].transmitState = .sent
+                // Mark as sent (only if not cancelled)
+                if isTransmitting {
+                    channels[channelIndex].messages[messageIndex].transmitState = .sent
+                }
+            } catch AudioServiceError.playbackCancelled {
+                print("[ChatViewModel] Transmission cancelled")
+                // State already set by stopTransmission
             } catch {
                 print("[ChatViewModel] Transmission failed: \(error)")
                 channels[channelIndex].messages[messageIndex].transmitState = .failed
             }
 
             isTransmitting = false
+            currentTransmissionChannelIndex = nil
+            currentTransmissionMessageIndex = nil
         }
     }
 

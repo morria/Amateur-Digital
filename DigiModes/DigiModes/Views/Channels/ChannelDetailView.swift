@@ -103,7 +103,11 @@ struct ChannelDetailView: View {
                             .autocorrectionDisabled(true)
 
                         Button {
-                            sendMessage()
+                            if viewModel.isTransmitting {
+                                viewModel.stopTransmission()
+                            } else {
+                                sendMessage()
+                            }
                         } label: {
                             Image(systemName: viewModel.isTransmitting ? "stop.fill" : "arrow.up.circle.fill")
                                 .font(.system(size: 32))
@@ -118,19 +122,8 @@ struct ChannelDetailView: View {
                     .padding(.vertical, 8)
                 }
             }
-            .navigationTitle(channel.displayName)
+            .navigationTitle(channel.frequencyOffsetDisplay)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    VStack(spacing: 0) {
-                        Text(channel.displayName)
-                            .font(.headline)
-                        Text("\(channel.frequency) Hz")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
         } else {
             ContentUnavailableView("Channel Deleted", systemImage: "trash")
         }
