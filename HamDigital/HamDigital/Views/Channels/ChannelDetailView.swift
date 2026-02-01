@@ -10,6 +10,7 @@ import SwiftUI
 struct ChannelDetailView: View {
     let channelID: UUID
     @EnvironmentObject var viewModel: ChatViewModel
+    @ObservedObject private var settings = SettingsManager.shared
     @State private var messageText = ""
     @State private var dragOffset: CGFloat = 0
     @State private var showTimestamps = false
@@ -20,6 +21,16 @@ struct ChannelDetailView: View {
     /// Look up the current channel from viewModel to get live updates
     private var channel: Channel? {
         viewModel.channels.first { $0.id == channelID }
+    }
+
+    /// CQ calling message placeholder based on user's callsign and grid
+    private var cqPlaceholder: String {
+        let call = settings.callsign
+        let grid = settings.effectiveGrid
+        if grid.isEmpty {
+            return "CQ CQ CQ DE \(call) \(call) K"
+        }
+        return "CQ CQ CQ DE \(call) \(call) \(grid) K"
     }
 
     init(channel: Channel) {
@@ -90,7 +101,7 @@ struct ChannelDetailView: View {
                     }
 
                     HStack(spacing: 12) {
-                        TextField("Enter message...", text: $messageText, axis: .vertical)
+                        TextField(cqPlaceholder, text: $messageText, axis: .vertical)
                             .textFieldStyle(.plain)
                             .font(.system(.body, design: .monospaced))
                             .padding(.horizontal, 12)
@@ -111,12 +122,9 @@ struct ChannelDetailView: View {
                         } label: {
                             Image(systemName: viewModel.isTransmitting ? "stop.fill" : "arrow.up.circle.fill")
                                 .font(.system(size: 32))
-                                .foregroundColor(
-                                    viewModel.isTransmitting ? .red :
-                                    (messageText.isEmpty ? .gray : .blue)
-                                )
+                                .foregroundColor(viewModel.isTransmitting ? .red : .blue)
                         }
-                        .disabled(messageText.isEmpty && !viewModel.isTransmitting)
+                        .disabled(viewModel.isTransmitting == false && messageText.isEmpty && cqPlaceholder.isEmpty)
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -130,8 +138,11 @@ struct ChannelDetailView: View {
     }
 
     private func sendMessage() {
-        guard !messageText.isEmpty, let channel = channel else { return }
-        viewModel.sendMessage(messageText, toChannel: channel)
+        guard let channel = channel else { return }
+        // Use placeholder CQ message if text field is empty
+        let textToSend = messageText.isEmpty ? cqPlaceholder : messageText
+        guard !textToSend.isEmpty else { return }
+        viewModel.sendMessage(textToSend, toChannel: channel)
         messageText = ""
         isTextFieldFocused = false
     }
