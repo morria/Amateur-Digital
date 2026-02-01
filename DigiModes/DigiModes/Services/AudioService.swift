@@ -2,8 +2,7 @@
 //  AudioService.swift
 //  DigiModes
 //
-//  Placeholder for audio interface handling
-//  Will use AVAudioEngine for external USB audio devices
+//  Audio interface handling using AVAudioEngine for USB audio devices
 //
 
 import Foundation
@@ -11,57 +10,149 @@ import AVFoundation
 
 /// AudioService handles connection to external USB audio interfaces
 /// and provides audio I/O for digital mode encoding/decoding.
-///
-/// Future implementation will:
-/// - Detect external USB audio interfaces via AVAudioSession
-/// - Configure audio routes for input (RX) and output (TX)
-/// - Handle sample rate conversion if needed
-/// - Manage audio buffers for DSP processing
 class AudioService: ObservableObject {
     // MARK: - Published Properties
     @Published var isConnected: Bool = false
     @Published var inputDeviceName: String = "None"
     @Published var outputDeviceName: String = "None"
     @Published var sampleRate: Double = 48000.0
+    @Published var isPlaying: Bool = false
 
-    // MARK: - Audio Engine (for future implementation)
+    // MARK: - Audio Engine
     private var audioEngine: AVAudioEngine?
-    private var inputNode: AVAudioInputNode?
-    private var outputNode: AVAudioOutputNode?
+    private var playerNode: AVAudioPlayerNode?
+
+    /// Audio format for playback (48kHz mono Float32)
+    private var playbackFormat: AVAudioFormat?
+
+    /// Continuation for async playback completion
+    private var playbackContinuation: CheckedContinuation<Void, Error>?
 
     // MARK: - Initialization
     init() {
         setupNotifications()
     }
 
+    deinit {
+        stop()
+    }
+
     // MARK: - Public Methods
 
-    /// Start audio engine and begin processing
+    /// Start audio engine and configure for playback
     func start() async throws {
-        // TODO: Implement audio engine startup
-        // 1. Configure AVAudioSession for .playAndRecord
-        // 2. Set up AVAudioEngine
-        // 3. Install tap on input node for RX audio
-        // 4. Connect output node for TX audio
-        print("[AudioService] start() - Not yet implemented")
+        // Configure audio session
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .allowBluetooth])
+        try session.setActive(true)
+
+        // Create audio engine
+        let engine = AVAudioEngine()
+        self.audioEngine = engine
+
+        // Create player node for transmission
+        let player = AVAudioPlayerNode()
+        self.playerNode = player
+        engine.attach(player)
+
+        // Get output format and create mono format for our signals
+        let outputFormat = engine.outputNode.outputFormat(forBus: 0)
+        sampleRate = outputFormat.sampleRate
+
+        // Create mono Float32 format at the engine's sample rate
+        guard let monoFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sampleRate,
+            channels: 1,
+            interleaved: false
+        ) else {
+            throw AudioServiceError.formatError
+        }
+        self.playbackFormat = monoFormat
+
+        // Connect player -> main mixer
+        engine.connect(player, to: engine.mainMixerNode, format: monoFormat)
+
+        // Start the engine
+        try engine.start()
+
+        isConnected = true
+        updateDeviceNames()
+
+        print("[AudioService] Started with sample rate: \(sampleRate) Hz")
     }
 
     /// Stop audio engine
     func stop() {
-        // TODO: Implement audio engine shutdown
-        print("[AudioService] stop() - Not yet implemented")
+        playerNode?.stop()
+        audioEngine?.stop()
+        audioEngine = nil
+        playerNode = nil
+        isConnected = false
+        isPlaying = false
+        print("[AudioService] Stopped")
     }
 
-    /// Get current input audio buffer for decoding
+    /// Play an audio buffer and wait for completion
+    ///
+    /// - Parameter buffer: The audio buffer to play
+    /// - Throws: AudioServiceError if playback fails
+    func playBuffer(_ buffer: AVAudioPCMBuffer) async throws {
+        guard let player = playerNode, let engine = audioEngine, engine.isRunning else {
+            throw AudioServiceError.notConnected
+        }
+
+        // Convert buffer to engine format if needed
+        let playableBuffer: AVAudioPCMBuffer
+        if let format = playbackFormat, buffer.format != format {
+            guard let converted = convertBuffer(buffer, to: format) else {
+                throw AudioServiceError.formatError
+            }
+            playableBuffer = converted
+        } else {
+            playableBuffer = buffer
+        }
+
+        isPlaying = true
+
+        // Use async continuation to wait for playback completion
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            self.playbackContinuation = continuation
+
+            player.scheduleBuffer(playableBuffer) { [weak self] in
+                DispatchQueue.main.async {
+                    self?.isPlaying = false
+                    self?.playbackContinuation?.resume(returning: ())
+                    self?.playbackContinuation = nil
+                }
+            }
+
+            if !player.isPlaying {
+                player.play()
+            }
+        }
+    }
+
+    /// Play raw Float samples
+    ///
+    /// - Parameter samples: Array of audio samples to play
+    /// - Throws: AudioServiceError if playback fails
+    func playSamples(_ samples: [Float]) async throws {
+        guard let format = playbackFormat else {
+            throw AudioServiceError.notConnected
+        }
+
+        guard let buffer = createBuffer(from: samples, format: format) else {
+            throw AudioServiceError.formatError
+        }
+
+        try await playBuffer(buffer)
+    }
+
+    /// Get current input audio buffer for decoding (future implementation)
     func getInputBuffer() -> AVAudioPCMBuffer? {
-        // TODO: Return current audio buffer from input tap
+        // TODO: Implement input tap for RX audio
         return nil
-    }
-
-    /// Queue audio buffer for transmission
-    func queueOutputBuffer(_ buffer: AVAudioPCMBuffer) {
-        // TODO: Schedule buffer for playback through output node
-        print("[AudioService] queueOutputBuffer() - Not yet implemented")
     }
 
     // MARK: - Private Methods
@@ -85,14 +176,102 @@ class AudioService: ObservableObject {
     }
 
     @objc private func handleRouteChange(_ notification: Notification) {
-        // TODO: Handle USB audio interface connect/disconnect
-        // Update isConnected and device names
         print("[AudioService] Route change detected")
+        updateDeviceNames()
     }
 
     @objc private func handleConfigurationChange(_ notification: Notification) {
-        // TODO: Handle audio configuration changes
-        // May need to restart engine with new settings
         print("[AudioService] Configuration change detected")
+        // Engine may need to be restarted with new configuration
+        if let engine = audioEngine, !engine.isRunning {
+            try? engine.start()
+        }
+    }
+
+    private func updateDeviceNames() {
+        let session = AVAudioSession.sharedInstance()
+        let route = session.currentRoute
+
+        if let input = route.inputs.first {
+            inputDeviceName = input.portName
+        } else {
+            inputDeviceName = "None"
+        }
+
+        if let output = route.outputs.first {
+            outputDeviceName = output.portName
+        } else {
+            outputDeviceName = "None"
+        }
+    }
+
+    /// Create AVAudioPCMBuffer from Float array
+    private func createBuffer(from samples: [Float], format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: AVAudioFrameCount(samples.count)
+        ) else {
+            return nil
+        }
+
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+
+        if let channelData = buffer.floatChannelData?[0] {
+            for (index, sample) in samples.enumerated() {
+                channelData[index] = sample
+            }
+        }
+
+        return buffer
+    }
+
+    /// Convert buffer to target format
+    private func convertBuffer(_ buffer: AVAudioPCMBuffer, to format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        guard let converter = AVAudioConverter(from: buffer.format, to: format) else {
+            return nil
+        }
+
+        let outputFrameCapacity = AVAudioFrameCount(
+            Double(buffer.frameLength) * format.sampleRate / buffer.format.sampleRate
+        )
+
+        guard let outputBuffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: outputFrameCapacity
+        ) else {
+            return nil
+        }
+
+        var error: NSError?
+        converter.convert(to: outputBuffer, error: &error) { inNumPackets, outStatus in
+            outStatus.pointee = .haveData
+            return buffer
+        }
+
+        if let error = error {
+            print("[AudioService] Conversion error: \(error)")
+            return nil
+        }
+
+        return outputBuffer
+    }
+}
+
+// MARK: - Errors
+
+enum AudioServiceError: Error, LocalizedError {
+    case notConnected
+    case formatError
+    case playbackFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .notConnected:
+            return "Audio service not connected"
+        case .formatError:
+            return "Audio format error"
+        case .playbackFailed:
+            return "Audio playback failed"
+        }
     }
 }

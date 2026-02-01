@@ -1,8 +1,8 @@
-# DigiModes - Claude Development Notes
+# Ham Digital - Claude Development Notes
 
 ## Project Overview
 
-iOS app for amateur radio digital modes (RTTY, PSK31, Olivia) with an iMessage-style chat interface. Uses external USB soundcard connected between iPhone and radio for audio I/O.
+Ham Digital is an iOS app for amateur radio digital modes (RTTY, PSK31, Olivia) with an iMessage-style chat interface. Uses external USB soundcard connected between iPhone and radio for audio I/O.
 
 ## Build Commands
 
@@ -28,7 +28,7 @@ cd DigiModes/DigiModesCore && swift test
 2. **DigiModesCore/** - Swift Package with core logic (buildable via CLI)
 
 ### Key Design Decisions
-- iOS 16+ target (uses `ObservableObject`, not `@Observable`)
+- iOS 17+ target (uses `ObservableObject`, not `@Observable`)
 - Messages-style two-level navigation: Channel List → Channel Detail
 - Ham radio conventions: uppercase text, callsigns, RST reports
 - Channel = detected signal on a frequency, may have multiple participants
@@ -45,7 +45,7 @@ DigiModes/
 │   │   ├── Components/           # ModePickerView
 │   │   └── Settings/             # SettingsView with AudioMeterView
 │   ├── ViewModels/               # ChatViewModel
-│   └── Services/                 # AudioService, ModemService (placeholders)
+│   └── Services/                 # AudioService (real audio), ModemService (bridges to DigiModesCore)
 │
 └── DigiModesCore/                # Swift Package
     ├── Sources/DigiModesCore/
@@ -61,15 +61,36 @@ DigiModes/
 - Baudot/ITA2 codec with LTRS/FIGS shift handling
 - Sample data for development (3 mock channels)
 - Swipe-to-reveal timestamps gesture
-- Basic transmit simulation
+- Channel list shows frequency offset from 1500 Hz center
+- Compose button to create new transmissions
+- Message transmit states (queued → transmitting → sent/failed)
+- Visual feedback with color-coded bubbles and status indicators
+- AudioService with AVAudioEngine for real audio output
+- Integration with ModemService for RTTY encoding
 
 ### Next Steps (RTTY Implementation)
-1. **Audio capture** - AVAudioEngine setup for external soundcard input
-2. **FSK demodulation** - Detect mark/space tones (typically 2125/2295 Hz)
-3. **Bit timing** - Sample at correct baud rate (45.45 baud standard)
-4. **Baudot decoding** - Use existing BaudotCodec
-5. **Channel detection** - Identify distinct signals in passband
-6. **FSK modulation** - Generate mark/space tones for transmit
+1. **Audio capture** - Install input tap on AVAudioEngine for RX audio
+2. **FSK demodulation** - Route input samples to MultiChannelRTTYDemodulator
+3. **Channel detection** - Create Channel objects from detected signals
+4. **Real-time decode display** - Show characters as they're decoded
+
+### Key Implementation Details
+
+**Message TransmitState**
+- `.queued` - Gray bubble, clock icon - message waiting in queue
+- `.transmitting` - Orange bubble, spinner - audio being played
+- `.sent` - Blue bubble, checkmark - transmission complete
+- `.failed` - Red bubble, warning icon - transmission error
+
+**AudioService**
+- Uses AVAudioPlayerNode for playback
+- Async `playBuffer()` method waits for completion
+- Falls back to simulated delay if modem unavailable
+- Handles sample rate conversion automatically
+
+**Frequency Offset Display**
+- Channel list shows offset from 1500 Hz center (e.g., "+125 Hz", "-50 Hz")
+- Matches typical waterfall display conventions
 
 ### Technical Notes
 

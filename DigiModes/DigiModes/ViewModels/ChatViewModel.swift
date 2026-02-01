@@ -14,15 +14,27 @@ class ChatViewModel: ObservableObject {
     @Published var selectedMode: DigitalMode = .rtty
     @Published var isTransmitting: Bool = false
 
-    // MARK: - Services (Placeholders)
-    private var audioService: AudioService?
-    private var modemService: ModemService?
+    // MARK: - Services
+    private let audioService: AudioService
+    private let modemService: ModemService
+
+    // MARK: - Constants
+    private let defaultComposeFrequency = 1500
 
     // MARK: - Initialization
     init() {
-        #if DEBUG
-        loadSampleChannels()
-        #endif
+        self.audioService = AudioService()
+        self.modemService = ModemService()
+
+        // Start audio service
+        Task {
+            do {
+                try await audioService.start()
+                print("[ChatViewModel] Audio service started")
+            } catch {
+                print("[ChatViewModel] Failed to start audio: \(error)")
+            }
+        }
     }
 
     // MARK: - Public Methods
@@ -34,13 +46,15 @@ class ChatViewModel: ObservableObject {
             content: content.uppercased(),
             direction: .sent,
             mode: selectedMode,
-            callsign: Station.myStation.callsign
+            callsign: Station.myStation.callsign,
+            transmitState: .queued
         )
 
         channels[index].messages.append(message)
         channels[index].lastActivity = Date()
 
-        simulateTransmission(forChannelAt: index)
+        // Start transmission
+        transmitMessage(at: channels[index].messages.count - 1, inChannelAt: index)
     }
 
     func clearChannel(_ channel: Channel) {
@@ -48,49 +62,69 @@ class ChatViewModel: ObservableObject {
         channels[index].messages.removeAll()
     }
 
-    // MARK: - Private Methods (Simulation for Development)
-
-    private func loadSampleChannels() {
-        channels = Channel.sampleChannels
+    func deleteChannels(at offsets: IndexSet) {
+        channels.remove(atOffsets: offsets)
     }
 
-    private func simulateTransmission(forChannelAt index: Int) {
-        isTransmitting = true
+    func deleteChannel(_ channel: Channel) {
+        channels.removeAll { $0.id == channel.id }
+    }
 
-        let duration = Double(channels[index].messages.last?.content.count ?? 10) * 0.05
+    /// Get or create a compose channel at 1500 Hz
+    /// Returns existing channel at 1500 Hz if one exists, otherwise creates a new one
+    func getOrCreateComposeChannel() -> Channel {
+        // First, look for an existing channel at the default frequency
+        if let existingChannel = channels.first(where: { $0.frequency == defaultComposeFrequency }) {
+            return existingChannel
+        }
+
+        // No channel at default frequency - create one
+        let newChannel = Channel(
+            frequency: defaultComposeFrequency,
+            callsign: nil,
+            messages: [],
+            lastActivity: Date()
+        )
+        channels.insert(newChannel, at: 0)
+        return newChannel
+    }
+
+    // MARK: - Private Methods
+
+    private func transmitMessage(at messageIndex: Int, inChannelAt channelIndex: Int) {
+        guard channelIndex < channels.count,
+              messageIndex < channels[channelIndex].messages.count else { return }
+
+        let text = channels[channelIndex].messages[messageIndex].content
 
         Task {
-            try? await Task.sleep(for: .seconds(max(duration, 1.0)))
-            isTransmitting = false
+            // Mark as transmitting
+            channels[channelIndex].messages[messageIndex].transmitState = .transmitting
+            isTransmitting = true
 
-            simulateReceivedMessage(forChannelAt: index)
+            do {
+                try await performTransmission(text: text)
+                // Mark as sent
+                channels[channelIndex].messages[messageIndex].transmitState = .sent
+            } catch {
+                print("[ChatViewModel] Transmission failed: \(error)")
+                channels[channelIndex].messages[messageIndex].transmitState = .failed
+            }
+
+            isTransmitting = false
         }
     }
 
-    private func simulateReceivedMessage(forChannelAt index: Int) {
-        Task {
-            try? await Task.sleep(for: .seconds(2))
-
-            guard index < channels.count else { return }
-
-            let callsign = channels[index].callsign ?? "W1AW"
-            let responses = [
-                "R R TU 73 DE \(callsign) K",
-                "QSL QSL 73 GL",
-                "FB FB CUL 73",
-                "R TU FER QSO 73 DE \(callsign) K"
-            ]
-
-            let randomResponse = responses.randomElement() ?? "73"
-            let message = Message(
-                content: randomResponse,
-                direction: .received,
-                mode: selectedMode,
-                callsign: callsign
-            )
-
-            channels[index].messages.append(message)
-            channels[index].lastActivity = Date()
+    private func performTransmission(text: String) async throws {
+        // Encode text to audio samples via modem service
+        if let buffer = modemService.encodeTxText(text) {
+            print("[ChatViewModel] Encoded \(text.count) chars -> \(buffer.frameLength) samples")
+            // Play the audio buffer
+            try await audioService.playBuffer(buffer)
+            print("[ChatViewModel] Playback complete")
+        } else {
+            print("[ChatViewModel] Modem encoding failed - DigiModesCore may not be linked")
+            throw AudioServiceError.formatError
         }
     }
 }

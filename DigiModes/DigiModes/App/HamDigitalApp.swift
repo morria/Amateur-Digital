@@ -1,6 +1,6 @@
 //
-//  DigiModesApp.swift
-//  DigiModes
+//  HamDigitalApp.swift
+//  Ham Digital
 //
 //  Amateur Radio Digital Modes Chat Application
 //
@@ -8,7 +8,7 @@
 import SwiftUI
 
 @main
-struct DigiModesApp: App {
+struct HamDigitalApp: App {
     @StateObject private var chatViewModel = ChatViewModel()
 
     var body: some Scene {

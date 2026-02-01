@@ -10,7 +10,7 @@ struct ModePickerView: View {
 
     var body: some View {
         Menu {
-            ForEach(DigitalMode.allCases) { mode in
+            ForEach(ModeConfig.allEnabledModes) { mode in
                 Button {
                     viewModel.selectedMode = mode
                 } label: {

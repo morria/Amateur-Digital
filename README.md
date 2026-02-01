@@ -1,17 +1,17 @@
-# DigiModes
+# Ham Digital
 
 An iOS app that provides an iMessage-like interface for amateur radio digital modes (RTTY, PSK31, Olivia) using an external USB audio interface.
 
-## Current Status: Skeleton
+## Current Status: Functional Prototype
 
-This is a minimal skeleton app to prove the concept and get running on a real iOS device. The UI is functional but all radio/audio functionality is simulated.
+The app has a working UI with real audio transmission support. Ham Digital can generate and play RTTY audio signals through the device output. Reception (decoding) is not yet implemented.
 
 ## Getting Started
 
 ### Requirements
 
 - Xcode 15.0+
-- iOS 16.0+ device or simulator
+- iOS 17.0+ device or simulator
 - Apple Developer account (for device deployment)
 
 ### Setup
@@ -40,7 +40,7 @@ xcodebuild test -scheme DigiModesCore -destination 'platform=macOS'
 
 ## Development Roadmap
 
-### Phase 1: Skeleton App ✅ (Current)
+### Phase 1: Skeleton App ✅
 
 - [x] SwiftUI project structure
 - [x] iMessage-style chat interface
@@ -51,25 +51,28 @@ xcodebuild test -scheme DigiModesCore -destination 'platform=macOS'
 - [x] Swift Package for core logic (CLI buildable)
 - [x] Baudot codec with unit tests
 
-### Phase 2: Audio Interface
+### Phase 2: Audio Interface ✅
 
-- [ ] AVAudioEngine setup for USB audio devices
-- [ ] Input/output buffer management
-- [ ] Sample rate handling (44.1kHz, 48kHz)
+- [x] AVAudioEngine setup for USB audio devices
+- [x] Output buffer management for transmission
+- [x] Sample rate handling (48kHz default)
+- [ ] Input tap for reception
 
-### Phase 3: RTTY Implementation
+### Phase 3: RTTY Implementation (Partial)
 
 - [x] Baudot (ITA2) encoding/decoding tables
-- [ ] FSK modulation (tone generation)
+- [x] FSK modulation (tone generation) - via DigiModesCore
+- [x] Bit timing for transmission
 - [ ] FSK demodulation (tone detection)
-- [ ] Bit timing and synchronization
-- [ ] Mark/Space frequency configuration
+- [ ] Mark/Space frequency configuration UI
 - [ ] Shift detection (170Hz, 425Hz, 850Hz)
 
-### Phase 4: Message Handling
+### Phase 4: Message Handling (Partial)
 
+- [x] TX queue management with transmit states
+- [x] Visual feedback (queued/transmitting/sent/failed)
+- [x] Compose button for new messages
 - [ ] Character-by-character RX display
-- [ ] TX queue management
 - [ ] PTT control (via audio VOX)
 - [ ] Message macros/templates
 
@@ -131,7 +134,7 @@ DigiModes/
 ├── DigiModes.xcodeproj/        # Xcode project (iOS app)
 ├── DigiModes/                  # iOS app source
 │   ├── App/
-│   │   └── DigiModesApp.swift
+│   │   └── HamDigitalApp.swift
 │   ├── Models/                 # App-specific models
 │   ├── Views/
 │   │   ├── ContentView.swift

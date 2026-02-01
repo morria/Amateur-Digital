@@ -13,10 +13,18 @@ struct Message: Identifiable, Equatable {
     let mode: DigitalMode
     let callsign: String?
     let signalReport: String?  // RST or SNR
+    var transmitState: TransmitState?
 
     enum Direction: String, Codable {
         case received  // RX - decoded from audio
         case sent      // TX - transmitted by user
+    }
+
+    enum TransmitState: String, Codable {
+        case queued       // Message waiting to be transmitted
+        case transmitting // Currently being transmitted
+        case sent         // Successfully transmitted
+        case failed       // Transmission failed
     }
 
     init(
@@ -26,7 +34,8 @@ struct Message: Identifiable, Equatable {
         direction: Direction,
         mode: DigitalMode = .rtty,
         callsign: String? = nil,
-        signalReport: String? = nil
+        signalReport: String? = nil,
+        transmitState: TransmitState? = nil
     ) {
         self.id = id
         self.content = content
@@ -35,6 +44,7 @@ struct Message: Identifiable, Equatable {
         self.mode = mode
         self.callsign = callsign
         self.signalReport = signalReport
+        self.transmitState = transmitState
     }
 }
 

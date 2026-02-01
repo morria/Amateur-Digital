@@ -47,7 +47,7 @@ struct MessageListView: View {
                         }
                     }
             )
-            .onChange(of: messages.count) { _ in
+            .onChange(of: messages.count) { _, _ in
                 // Auto-scroll to newest message
                 if let lastMessage = messages.last {
                     withAnimation(.easeOut(duration: 0.3)) {

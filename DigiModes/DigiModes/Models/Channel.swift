@@ -33,6 +33,13 @@ struct Channel: Identifiable, Equatable, Hashable {
         callsign ?? "\(frequency) Hz"
     }
 
+    /// Frequency offset from 1500 Hz center
+    var frequencyOffsetDisplay: String {
+        let offset = frequency - 1500
+        let sign = offset >= 0 ? "+" : ""
+        return "\(sign)\(offset) Hz"
+    }
+
     /// Preview text for channel list (last message content)
     var previewText: String {
         messages.last?.content ?? ""

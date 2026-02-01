@@ -1,0 +1,84 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Gradient for background -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#16213e"/>
+    </linearGradient>
+
+    <!-- Gradient for waveform -->
+    <linearGradient id="waveGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#00d4ff"/>
+      <stop offset="50%" style="stop-color:#0099ff"/>
+      <stop offset="100%" style="stop-color:#00d4ff"/>
+    </linearGradient>
+
+    <!-- Glow effect -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background with rounded corners -->
+  <rect width="1024" height="1024" rx="224" fill="url(#bgGradient)"/>
+
+  <!-- Subtle grid pattern -->
+  <g opacity="0.1" stroke="#ffffff" stroke-width="1">
+    <line x1="256" y1="0" x2="256" y2="1024"/>
+    <line x1="512" y1="0" x2="512" y2="1024"/>
+    <line x1="768" y1="0" x2="768" y2="1024"/>
+    <line x1="0" y1="256" x2="1024" y2="256"/>
+    <line x1="0" y1="512" x2="1024" y2="512"/>
+    <line x1="0" y1="768" x2="1024" y2="768"/>
+  </g>
+
+  <!-- Main waveform - RTTY-style FSK pattern -->
+  <g filter="url(#glow)">
+    <!-- FSK waveform representing digital signal -->
+    <path d="M 120 512
+             L 180 512 L 180 380 L 280 380 L 280 512
+             L 340 512 L 340 644 L 400 644 L 400 512
+             L 460 512 L 460 380 L 520 380 L 520 512
+             L 580 512 L 580 380 L 680 380 L 680 512
+             L 740 512 L 740 644 L 800 644 L 800 512
+             L 860 512 L 860 380 L 904 380"
+          fill="none"
+          stroke="url(#waveGradient)"
+          stroke-width="32"
+          stroke-linecap="round"
+          stroke-linejoin="round"/>
+  </g>
+
+  <!-- Chat bubble accent (bottom right) -->
+  <g transform="translate(680, 620)">
+    <path d="M 0 0
+             C 0 -20, 20 -40, 60 -40
+             L 180 -40
+             C 220 -40, 240 -20, 240 0
+             L 240 80
+             C 240 100, 220 120, 180 120
+             L 80 120
+             L 40 160
+             L 40 120
+             L 60 120
+             C 20 120, 0 100, 0 80
+             Z"
+          fill="#0099ff"
+          opacity="0.9"/>
+    <!-- Dots in chat bubble -->
+    <circle cx="80" cy="40" r="12" fill="#ffffff"/>
+    <circle cx="120" cy="40" r="12" fill="#ffffff"/>
+    <circle cx="160" cy="40" r="12" fill="#ffffff"/>
+  </g>
+
+  <!-- Radio wave arcs (top left) -->
+  <g transform="translate(180, 280)" opacity="0.6">
+    <path d="M 0 60 A 60 60 0 0 1 60 0" fill="none" stroke="#00d4ff" stroke-width="8" stroke-linecap="round"/>
+    <path d="M -20 80 A 100 100 0 0 1 80 -20" fill="none" stroke="#00d4ff" stroke-width="6" stroke-linecap="round"/>
+    <path d="M -40 100 A 140 140 0 0 1 100 -40" fill="none" stroke="#00d4ff" stroke-width="4" stroke-linecap="round"/>
+  </g>
+</svg>

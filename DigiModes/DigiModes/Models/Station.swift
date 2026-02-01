@@ -26,10 +26,15 @@ struct Station: Identifiable {
         self.grid = grid
     }
 
-    static let myStation = Station(
-        callsign: "N0CALL",
-        name: "Your Name",
-        qth: "Your City, ST",
-        grid: "DM79"
-    )
+    /// Returns the current station info from SettingsManager
+    @MainActor
+    static var myStation: Station {
+        let settings = SettingsManager.shared
+        return Station(
+            callsign: settings.callsign,
+            name: settings.operatorName,
+            qth: settings.effectiveQTH,
+            grid: settings.effectiveGrid
+        )
+    }
 }

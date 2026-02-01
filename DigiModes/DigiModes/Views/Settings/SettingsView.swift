@@ -7,22 +7,71 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var myCallsign = Station.myStation.callsign
-    @State private var myName = Station.myStation.name
-    @State private var myQTH = Station.myStation.qth
-    @State private var myGrid = Station.myStation.grid
+    @ObservedObject private var settings = SettingsManager.shared
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("My Station") {
-                    TextField("Callsign", text: $myCallsign)
+                    TextField("Callsign", text: $settings.callsign)
                         .textInputAutocapitalization(.characters)
                         .autocorrectionDisabled()
-                    TextField("Name", text: $myName)
-                    TextField("QTH (City, State)", text: $myQTH)
-                    TextField("Grid Square", text: $myGrid)
-                        .textInputAutocapitalization(.characters)
+                    TextField("Name", text: $settings.operatorName)
+                }
+
+                Section {
+                    Toggle("Use GPS for Location", isOn: $settings.useGPSLocation)
+
+                    if settings.useGPSLocation {
+                        // GPS-derived values (read-only display)
+                        HStack {
+                            Text("Grid Square")
+                            Spacer()
+                            if settings.gpsGrid.isEmpty {
+                                Text(locationStatusText)
+                                    .foregroundColor(.secondary)
+                            } else {
+                                Text(settings.gpsGrid)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+
+                        HStack {
+                            Text("QTH")
+                            Spacer()
+                            if settings.gpsQTH.isEmpty {
+                                Text(locationStatusText)
+                                    .foregroundColor(.secondary)
+                            } else {
+                                Text(settings.gpsQTH)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+
+                        if case .denied = settings.locationStatus {
+                            Text("Location access denied. Enable in Settings app.")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+
+                        Button("Update Location") {
+                            settings.requestLocationUpdate()
+                        }
+                        .disabled(settings.locationStatus == .updating)
+                    } else {
+                        // Manual entry
+                        TextField("Grid Square", text: $settings.grid)
+                            .textInputAutocapitalization(.characters)
+                        TextField("QTH (City, State)", text: $settings.qth)
+                    }
+                } header: {
+                    Text("Location")
+                } footer: {
+                    if settings.useGPSLocation {
+                        Text("Grid square and QTH are automatically determined from your location.")
+                    } else {
+                        Text("Enter your Maidenhead grid square (e.g., DM79lv) and location manually.")
+                    }
                 }
 
                 Section("Audio") {
@@ -34,24 +83,30 @@ struct SettingsView: View {
                 }
 
                 Section("Digital Modes") {
-                    NavigationLink {
-                        RTTYSettingsView()
-                    } label: {
-                        Label("RTTY Settings", systemImage: "dot.radiowaves.left.and.right")
+                    if ModeConfig.isEnabled(.rtty) {
+                        NavigationLink {
+                            RTTYSettingsView()
+                        } label: {
+                            Label("RTTY Settings", systemImage: "dot.radiowaves.left.and.right")
+                        }
                     }
 
-                    NavigationLink {
-                        Text("PSK31 Settings - Coming Soon")
-                            .foregroundColor(.secondary)
-                    } label: {
-                        Label("PSK31 Settings", systemImage: "waveform.path")
+                    if ModeConfig.isEnabled(.psk31) {
+                        NavigationLink {
+                            Text("PSK31 Settings - Coming Soon")
+                                .foregroundColor(.secondary)
+                        } label: {
+                            Label("PSK31 Settings", systemImage: "waveform.path")
+                        }
                     }
 
-                    NavigationLink {
-                        Text("Olivia Settings - Coming Soon")
-                            .foregroundColor(.secondary)
-                    } label: {
-                        Label("Olivia Settings", systemImage: "waveform.circle")
+                    if ModeConfig.isEnabled(.olivia) {
+                        NavigationLink {
+                            Text("Olivia Settings - Coming Soon")
+                                .foregroundColor(.secondary)
+                        } label: {
+                            Label("Olivia Settings", systemImage: "waveform.circle")
+                        }
                     }
                 }
 
@@ -59,7 +114,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Version")
                         Spacer()
-                        Text("1.0.0 (Skeleton)")
+                        Text("1.0.0")
                             .foregroundColor(.secondary)
                     }
                 }
@@ -73,6 +128,21 @@ struct SettingsView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var locationStatusText: String {
+        switch settings.locationStatus {
+        case .unknown:
+            return "Unknown"
+        case .denied:
+            return "Access Denied"
+        case .updating:
+            return "Updating..."
+        case .current:
+            return "—"
+        case .error(let message):
+            return "Error: \(message)"
         }
     }
 }
@@ -97,7 +167,8 @@ struct AudioMeterView: View {
                     // Level indicator
                     RoundedRectangle(cornerRadius: 4)
                         .fill(meterColor)
-                        .frame(width: geometry.size.width * audioMeter.normalizedLevel)
+                        .frame(width: geometry.size.width * audioMeter.displayLevel)
+                        .animation(.easeOut(duration: 0.15), value: audioMeter.displayLevel)
 
                     // Peak indicator
                     if audioMeter.peakLevel > 0.01 {
@@ -128,9 +199,9 @@ struct AudioMeterView: View {
             .padding(.horizontal)
 
             // Current level display
-            Text(String(format: "%.1f dB", audioMeter.decibelLevel))
+            Text(String(format: "%.1f dB", audioMeter.displayDecibels))
                 .font(.system(.title, design: .monospaced))
-                .foregroundColor(audioMeter.decibelLevel > -6 ? .red : .primary)
+                .foregroundColor(audioMeter.displayDecibels > -6 ? .red : .primary)
 
             Spacer()
 
@@ -156,9 +227,9 @@ struct AudioMeterView: View {
     }
 
     private var meterColor: Color {
-        if audioMeter.decibelLevel > -3 {
+        if audioMeter.displayDecibels > -3 {
             return .red
-        } else if audioMeter.decibelLevel > -10 {
+        } else if audioMeter.displayDecibels > -10 {
             return .yellow
         } else {
             return .green
@@ -170,59 +241,80 @@ struct AudioMeterView: View {
 
 @MainActor
 class AudioMeterModel: ObservableObject {
-    @Published var normalizedLevel: CGFloat = 0
+    // Raw values (updated frequently)
+    private var rawLevel: CGFloat = 0
+    private var rawDecibels: Double = -60
+
+    // Smoothed display values (updated less frequently)
+    @Published var displayLevel: CGFloat = 0
+    @Published var displayDecibels: Double = -60
     @Published var peakLevel: CGFloat = 0
-    @Published var decibelLevel: Double = -60
 
     private var isMonitoring = false
-    private var simulationTask: Task<Void, Never>?
+    private var sampleTask: Task<Void, Never>?
+    private var displayTask: Task<Void, Never>?
+
+    // Smoothing parameters
+    private let smoothingFactor: CGFloat = 0.3  // Higher = more responsive, lower = smoother
 
     func startMonitoring() {
         guard !isMonitoring else { return }
         isMonitoring = true
 
-        // TODO: Replace with real AVAudioEngine input metering
-        // For now, simulate audio levels for UI development
-        simulationTask = Task {
+        // Sample audio frequently (for accurate peak detection)
+        sampleTask = Task {
             while isMonitoring {
-                // Simulate varying audio levels
-                let baseLevel = Double.random(in: 0.1...0.4)
-                let noise = Double.random(in: -0.1...0.1)
+                // TODO: Replace with real AVAudioEngine input metering
+                // For now, simulate audio levels for UI development
+                let baseLevel = Double.random(in: 0.15...0.35)
+                let noise = Double.random(in: -0.05...0.05)
                 let level = min(1.0, max(0.0, baseLevel + noise))
 
-                normalizedLevel = CGFloat(level)
-                decibelLevel = 20 * log10(max(level, 0.001))
+                rawLevel = CGFloat(level)
+                rawDecibels = 20 * log10(max(level, 0.001))
 
-                // Update peak with decay
-                if CGFloat(level) > peakLevel {
-                    peakLevel = CGFloat(level)
-                } else {
-                    peakLevel = max(0, peakLevel - 0.01)
+                // Update peak immediately (peaks should be responsive)
+                if rawLevel > peakLevel {
+                    peakLevel = rawLevel
                 }
 
-                try? await Task.sleep(for: .milliseconds(50))
+                try? await Task.sleep(for: .milliseconds(30))
+            }
+        }
+
+        // Update display values less frequently with smoothing
+        displayTask = Task {
+            while isMonitoring {
+                // Exponential moving average for smooth display
+                displayLevel = displayLevel + (rawLevel - displayLevel) * smoothingFactor
+                displayDecibels = displayDecibels + (rawDecibels - displayDecibels) * Double(smoothingFactor)
+
+                // Decay peak slowly
+                peakLevel = max(0, peakLevel - 0.008)
+
+                try? await Task.sleep(for: .milliseconds(100))
             }
         }
     }
 
     func stopMonitoring() {
         isMonitoring = false
-        simulationTask?.cancel()
-        simulationTask = nil
+        sampleTask?.cancel()
+        displayTask?.cancel()
+        sampleTask = nil
+        displayTask = nil
     }
 }
 
 // MARK: - RTTY Settings View
 
 struct RTTYSettingsView: View {
-    @State private var baudRate = 45.45
-    @State private var markFreq = 2125.0
-    @State private var shift = 170.0
+    @ObservedObject private var settings = SettingsManager.shared
 
     var body: some View {
         Form {
             Section("Baud Rate") {
-                Picker("Baud Rate", selection: $baudRate) {
+                Picker("Baud Rate", selection: $settings.rttyBaudRate) {
                     Text("45.45 Baud").tag(45.45)
                     Text("50 Baud").tag(50.0)
                     Text("75 Baud").tag(75.0)
@@ -233,21 +325,21 @@ struct RTTYSettingsView: View {
                 HStack {
                     Text("Mark Frequency")
                     Spacer()
-                    Text("\(Int(markFreq)) Hz")
+                    Text("\(Int(settings.rttyMarkFreq)) Hz")
                         .foregroundColor(.secondary)
                 }
 
                 HStack {
                     Text("Shift")
                     Spacer()
-                    Text("\(Int(shift)) Hz")
+                    Text("\(Int(settings.rttyShift)) Hz")
                         .foregroundColor(.secondary)
                 }
 
                 HStack {
                     Text("Space Frequency")
                     Spacer()
-                    Text("\(Int(markFreq - shift)) Hz")
+                    Text("\(Int(settings.rttyMarkFreq - settings.rttyShift)) Hz")
                         .foregroundColor(.secondary)
                 }
             }

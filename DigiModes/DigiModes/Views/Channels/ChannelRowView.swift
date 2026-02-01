@@ -12,9 +12,9 @@ struct ChannelRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Top row: callsign/frequency and time
+            // Top row: frequency offset and time
             HStack {
-                Text(channel.displayName)
+                Text(channel.frequencyOffsetDisplay)
                     .font(.headline)
 
                 Spacer()
