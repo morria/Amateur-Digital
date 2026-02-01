@@ -8,6 +8,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var settings = SettingsManager.shared
+    var chatViewModel: ChatViewModel?
 
     var body: some View {
         NavigationStack {
@@ -107,6 +108,16 @@ struct SettingsView: View {
                         } label: {
                             Label("Olivia Settings", systemImage: "waveform.circle")
                         }
+                    }
+                }
+
+                if let viewModel = chatViewModel {
+                    Section {
+                        DebugAudioTestView(chatViewModel: viewModel)
+                    } header: {
+                        Text("Debug")
+                    } footer: {
+                        Text("Test the decoding pipeline with pre-generated RTTY audio files.")
                     }
                 }
 
@@ -356,6 +367,85 @@ struct RTTYSettingsView: View {
             }
         }
         .navigationTitle("RTTY Settings")
+    }
+}
+
+// MARK: - Debug Audio Test View
+
+struct DebugAudioTestView: View {
+    @ObservedObject var chatViewModel: ChatViewModel
+    @State private var customPath: String = "/tmp/rtty_single_channel.wav"
+
+    private let testFiles = [
+        ("Single Channel (2125 Hz)", "/tmp/rtty_single_channel.wav"),
+        ("Multi Channel", "/tmp/rtty_multi_channel.wav")
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Pre-defined test files (works in Simulator with host Mac files)
+            ForEach(testFiles, id: \.1) { name, path in
+                testFileRow(name: name, path: path)
+            }
+
+            Divider()
+
+            // Custom path input
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Custom Path")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                HStack {
+                    TextField("Path to WAV file", text: $customPath)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                    Button("Test") {
+                        chatViewModel.processTestAudioFile(at: customPath)
+                    }
+                    .disabled(chatViewModel.isProcessingTestAudio || customPath.isEmpty)
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            if chatViewModel.isProcessingTestAudio {
+                ProgressView(value: chatViewModel.testAudioProgress) {
+                    Text("Processing...")
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func testFileRow(name: String, path: String) -> some View {
+        HStack {
+            VStack(alignment: .leading) {
+                Text(name)
+                Text(path)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            if fileExists(at: path) {
+                Button("Play") {
+                    chatViewModel.processTestAudioFile(at: path)
+                }
+                .disabled(chatViewModel.isProcessingTestAudio)
+                .buttonStyle(.bordered)
+            } else {
+                Text("Not found")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    private func fileExists(at path: String) -> Bool {
+        FileManager.default.fileExists(atPath: path)
     }
 }
 

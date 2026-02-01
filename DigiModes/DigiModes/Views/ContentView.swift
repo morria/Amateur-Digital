@@ -13,19 +13,29 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             ChannelListView()
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    ModePickerView()
+                .overlay(alignment: .bottomTrailing) {
+                    // Compose button in bottom right (like iMessage)
+                    Button {
+                        navigateToCompose = viewModel.getOrCreateComposeChannel()
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                            .frame(width: 56, height: 56)
+                            .background(Color.blue)
+                            .clipShape(Circle())
+                            .shadow(radius: 4)
+                    }
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 20)
                 }
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        ModePickerView()
+                    }
 
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 16) {
-                        Button {
-                            navigateToCompose = viewModel.getOrCreateComposeChannel()
-                        } label: {
-                            Image(systemName: "square.and.pencil")
-                        }
-
+                    ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             showingSettings = true
                         } label: {
@@ -33,13 +43,12 @@ struct ContentView: View {
                         }
                     }
                 }
-            }
-            .sheet(isPresented: $showingSettings) {
-                SettingsView()
-            }
-            .navigationDestination(item: $navigateToCompose) { channel in
-                ChannelDetailView(channel: channel)
-            }
+                .sheet(isPresented: $showingSettings) {
+                    SettingsView(chatViewModel: viewModel)
+                }
+                .navigationDestination(item: $navigateToCompose) { channel in
+                    ChannelDetailView(channel: channel)
+                }
         }
     }
 }

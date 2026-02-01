@@ -30,6 +30,7 @@
 		A10000000000000000000022 /* DigiModesCore in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000001 /* DigiModesCore */; };
 		A10000000000000000000023 /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000023 /* SettingsManager.swift */; };
 		A10000000000000000000024 /* ModeConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000024 /* ModeConfig.swift */; };
+		A10000000000000000000026 /* TestAudioLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000026 /* TestAudioLoader.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -56,6 +57,7 @@
 		A20000000000000000000023 /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsManager.swift; sourceTree = "<group>"; };
 		A20000000000000000000024 /* ModeConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeConfig.swift; sourceTree = "<group>"; };
 		A20000000000000000000025 /* DigiModes.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DigiModes.entitlements; sourceTree = "<group>"; };
+		A20000000000000000000026 /* TestAudioLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestAudioLoader.swift; sourceTree = "<group>"; };
 		A30000000000000000000001 /* DigiModes.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DigiModes.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -157,6 +159,7 @@
 				A20000000000000000000014 /* AudioService.swift */,
 				A20000000000000000000015 /* ModemService.swift */,
 				A20000000000000000000023 /* SettingsManager.swift */,
+				A20000000000000000000026 /* TestAudioLoader.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -317,6 +320,7 @@
 				A10000000000000000000020 /* ChannelDetailView.swift in Sources */,
 				A10000000000000000000023 /* SettingsManager.swift in Sources */,
 				A10000000000000000000024 /* ModeConfig.swift in Sources */,
+				A10000000000000000000026 /* TestAudioLoader.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
