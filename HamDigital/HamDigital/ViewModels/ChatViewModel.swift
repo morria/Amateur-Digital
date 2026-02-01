@@ -22,11 +22,16 @@ class ChatViewModel: ObservableObject {
     // MARK: - Constants
     private let defaultComposeFrequency = 1500
 
-    /// Timeout for grouping characters into messages (seconds)
-    private let messageGroupTimeout: TimeInterval = 2.0
+    /// Timeout for grouping incoming messages (seconds)
+    /// Only create a new received message after this much silence
+    private let messageGroupTimeout: TimeInterval = 60.0
 
-    /// Last decode time per frequency
+    /// Last decode time per frequency (for detecting silence gaps)
     private var lastDecodeTime: [Double: Date] = [:]
+
+    /// Last time content was added to a received message per frequency
+    /// Used to determine when to start a new message vs append
+    private var lastReceivedContentTime: [Double: Date] = [:]
 
     /// Test audio processing state
     @Published var isProcessingTestAudio: Bool = false
@@ -76,6 +81,9 @@ class ChatViewModel: ObservableObject {
 
         channels[index].messages.append(message)
         channels[index].lastActivity = Date()
+
+        // Clear received content time so next incoming content starts a new message
+        lastReceivedContentTime[Double(channels[index].frequency)] = nil
 
         // Start transmission
         transmitMessage(at: channels[index].messages.count - 1, inChannelAt: index)
@@ -171,17 +179,24 @@ class ChatViewModel: ObservableObject {
         }
     }
 
-    /// Get or create a compose channel at 1500 Hz
-    /// Returns existing channel at 1500 Hz if one exists, otherwise creates a new one
+    /// Get or create a compose channel for new messages
+    /// Returns an existing empty channel (no messages or decoding buffer) to avoid
+    /// stepping on existing conversations. Creates a new channel at 1500 Hz if needed.
     func getOrCreateComposeChannel() -> Channel {
-        // First, look for an existing channel at the default frequency
-        if let existingChannel = channels.first(where: { $0.frequency == defaultComposeFrequency }) {
-            return existingChannel
+        // First, look for an existing channel with no content
+        if let emptyChannel = channels.first(where: { !$0.hasContent }) {
+            return emptyChannel
         }
 
-        // No channel at default frequency - create one
+        // All channels have content - create a new one at default frequency
+        // If 1500 Hz is taken, find the next available frequency
+        var frequency = defaultComposeFrequency
+        while channels.contains(where: { abs($0.frequency - frequency) < 10 }) {
+            frequency += 200  // Step to next standard frequency spacing
+        }
+
         let newChannel = Channel(
-            frequency: defaultComposeFrequency,
+            frequency: frequency,
             callsign: nil,
             messages: [],
             lastActivity: Date()
@@ -261,29 +276,65 @@ class ChatViewModel: ObservableObject {
     }
 
     /// Flush accumulated decoded text to a message
+    /// Appends to the last received message if within timeout and no sent message since
     private func flushDecodedBuffer(for frequency: Double) {
         let channelIndex = getOrCreateChannel(at: frequency)
         let text = channels[channelIndex].decodingBuffer
 
         guard !text.isEmpty else { return }
 
-        // Create received message
-        let message = Message(
-            content: text.trimmingCharacters(in: .whitespacesAndNewlines),
-            direction: .received,
-            mode: selectedMode,
-            callsign: nil,  // TODO: Extract callsign from text
-            transmitState: nil
-        )
+        // Trim whitespace and control characters
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: .controlCharacters)
+        guard !trimmedText.isEmpty else {
+            channels[channelIndex].decodingBuffer = ""
+            return
+        }
 
-        channels[channelIndex].messages.append(message)
-        channels[channelIndex].lastActivity = Date()
+        let now = Date()
+
+        // Check if we can append to the last received message:
+        // - Last message must be received (not sent by user)
+        // - Must be within the timeout since last received content
+        let canAppend: Bool
+        if let lastMessageIndex = channels[channelIndex].messages.indices.last,
+           channels[channelIndex].messages[lastMessageIndex].direction == .received {
+            // Check time since last content was added (not message creation time)
+            if let lastContentTime = lastReceivedContentTime[frequency] {
+                canAppend = now.timeIntervalSince(lastContentTime) < messageGroupTimeout
+            } else {
+                // No previous content time, use message timestamp as fallback
+                canAppend = now.timeIntervalSince(channels[channelIndex].messages[lastMessageIndex].timestamp) < messageGroupTimeout
+            }
+        } else {
+            canAppend = false
+        }
+
+        if canAppend,
+           let lastMessageIndex = channels[channelIndex].messages.indices.last {
+            // Append to existing received message
+            channels[channelIndex].messages[lastMessageIndex].content += trimmedText
+            print("[ChatViewModel] RX appended on \(Int(frequency)) Hz: \(trimmedText)")
+        } else {
+            // Create new received message
+            let message = Message(
+                content: trimmedText,
+                direction: .received,
+                mode: selectedMode,
+                callsign: nil,  // TODO: Extract callsign from text
+                transmitState: nil
+            )
+            channels[channelIndex].messages.append(message)
+            print("[ChatViewModel] RX message on \(Int(frequency)) Hz: \(trimmedText)")
+        }
+
+        // Track when content was last added
+        lastReceivedContentTime[frequency] = now
+        channels[channelIndex].lastActivity = now
 
         // Clear buffer
         channels[channelIndex].decodingBuffer = ""
         lastDecodeTime[frequency] = nil
-
-        print("[ChatViewModel] RX message on \(Int(frequency)) Hz: \(message.content)")
     }
 }
 
@@ -318,31 +369,15 @@ extension ChatViewModel: ModemServiceDelegate {
         let channelIndex = getOrCreateChannel(at: frequency)
         let now = Date()
 
-        // Check if we should flush previous content (timeout)
+        // Check if we should flush previous content (long silence)
         if let lastTime = lastDecodeTime[frequency],
            now.timeIntervalSince(lastTime) > messageGroupTimeout {
-            // Flush old buffer first, then start new
-            let oldText = channels[channelIndex].decodingBuffer
-            channels[channelIndex].decodingBuffer = String(character)
-            if oldText.count > 1 {
-                // Create message from old buffer (without the new char we just added)
-                let trimmed = String(oldText.dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    let message = Message(
-                        content: trimmed,
-                        direction: .received,
-                        mode: selectedMode,
-                        callsign: nil,
-                        transmitState: nil
-                    )
-                    channels[channelIndex].messages.append(message)
-                    print("[ChatViewModel] RX message on \(Int(frequency)) Hz: \(trimmed)")
-                }
-            }
-        } else {
-            // Accumulate character in channel's decoding buffer
-            channels[channelIndex].decodingBuffer.append(character)
+            // Flush old buffer first using shared logic
+            flushDecodedBuffer(for: frequency)
         }
+
+        // Accumulate character in channel's decoding buffer
+        channels[channelIndex].decodingBuffer.append(character)
 
         lastDecodeTime[frequency] = now
         channels[channelIndex].lastActivity = now

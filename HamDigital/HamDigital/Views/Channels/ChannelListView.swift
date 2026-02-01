@@ -41,6 +41,7 @@ struct ChannelListView: View {
                             .foregroundColor(.secondary)
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
                     ForEach(visibleChannels.sorted { $0.frequency < $1.frequency }) { channel in

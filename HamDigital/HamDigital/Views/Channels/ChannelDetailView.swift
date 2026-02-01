@@ -33,7 +33,7 @@ struct ChannelDetailView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 8) {
-                            ForEach(channel.messages) { message in
+                            ForEach(channel.messages.filter { !$0.content.isEmpty }) { message in
                                 MessageBubbleView(
                                     message: message,
                                     revealedTimestamp: showTimestamps

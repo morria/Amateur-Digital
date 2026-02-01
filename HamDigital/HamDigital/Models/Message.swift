@@ -7,7 +7,7 @@ import Foundation
 
 struct Message: Identifiable, Equatable {
     let id: UUID
-    let content: String
+    var content: String
     let timestamp: Date
     let direction: Direction
     let mode: DigitalMode
