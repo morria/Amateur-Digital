@@ -248,6 +248,8 @@ class ChatViewModel: ObservableObject {
         // Encode text to audio samples via modem service
         if let buffer = modemService.encodeTxText(text) {
             print("[ChatViewModel] Encoded \(text.count) chars -> \(buffer.frameLength) samples")
+            // Apply output gain from settings
+            audioService.outputGain = Float(SettingsManager.shared.outputGain)
             // Play the audio buffer
             try await audioService.playBuffer(buffer)
             print("[ChatViewModel] Playback complete")

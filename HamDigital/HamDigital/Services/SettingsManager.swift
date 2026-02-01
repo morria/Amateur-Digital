@@ -107,6 +107,12 @@ class SettingsManager: NSObject, ObservableObject {
         didSet { save(rttySquelch, forKey: "rttySquelch") }
     }
 
+    // Audio Settings
+    /// Output gain multiplier (1.0 = 0dB, 2.0 = +6dB). Increase if VOX doesn't trigger.
+    @Published var outputGain: Double {
+        didSet { save(outputGain, forKey: "outputGain") }
+    }
+
     // MARK: - Location
 
     enum LocationStatus: Equatable {
@@ -146,6 +152,7 @@ class SettingsManager: NSObject, ObservableObject {
         self.rttyMarkFreq = Self.initialLoadDouble(forKey: "rttyMarkFreq", default: 2125.0)
         self.rttyShift = Self.initialLoadDouble(forKey: "rttyShift", default: 170.0)
         self.rttySquelch = Self.initialLoadDouble(forKey: "rttySquelch", default: 0.3)
+        self.outputGain = Self.initialLoadDouble(forKey: "outputGain", default: 1.0)
 
         super.init()
 
@@ -208,6 +215,7 @@ class SettingsManager: NSObject, ObservableObject {
             self.rttyMarkFreq = loadDouble(forKey: "rttyMarkFreq", default: 2125.0)
             self.rttyShift = loadDouble(forKey: "rttyShift", default: 170.0)
             self.rttySquelch = loadDouble(forKey: "rttySquelch", default: 0.3)
+            self.outputGain = loadDouble(forKey: "outputGain", default: 1.0)
         }
     }
 

@@ -23,6 +23,10 @@ class AudioService: ObservableObject, @unchecked Sendable {
     @Published var isPlaying: Bool = false
     @Published var isListening: Bool = false
 
+    /// Output gain multiplier (1.0 = unity, 2.0 = +6dB, etc.)
+    /// Increase if output level is too low for VOX
+    var outputGain: Float = 1.0
+
     // MARK: - Audio Engine
     private var audioEngine: AVAudioEngine?
     private var playerNode: AVAudioPlayerNode?
@@ -311,7 +315,7 @@ class AudioService: ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// Create AVAudioPCMBuffer from Float array
+    /// Create AVAudioPCMBuffer from Float array with gain applied
     private func createBuffer(from samples: [Float], format: AVAudioFormat) -> AVAudioPCMBuffer? {
         guard let buffer = AVAudioPCMBuffer(
             pcmFormat: format,
@@ -324,7 +328,9 @@ class AudioService: ObservableObject, @unchecked Sendable {
 
         if let channelData = buffer.floatChannelData?[0] {
             for (index, sample) in samples.enumerated() {
-                channelData[index] = sample
+                // Apply output gain (clamp to prevent distortion)
+                let gained = sample * outputGain
+                channelData[index] = max(-1.0, min(1.0, gained))
             }
         }
 

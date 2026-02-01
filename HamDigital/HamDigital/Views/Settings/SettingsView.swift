@@ -75,12 +75,26 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Audio") {
+                Section {
                     NavigationLink {
                         AudioMeterView()
                     } label: {
                         Label("Input Level Meter", systemImage: "waveform")
                     }
+
+                    VStack(alignment: .leading) {
+                        HStack {
+                            Text("TX Output Gain")
+                            Spacer()
+                            Text(String(format: "%.1fx", settings.outputGain))
+                                .foregroundColor(.secondary)
+                        }
+                        Slider(value: $settings.outputGain, in: 0.5...3.0, step: 0.1)
+                    }
+                } header: {
+                    Text("Audio")
+                } footer: {
+                    Text("Increase TX gain if VOX doesn't trigger. Values above 1.0 may clip.")
                 }
 
                 Section("Digital Modes") {
