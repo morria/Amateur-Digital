@@ -7,28 +7,28 @@ Ham Digital is an iOS app for amateur radio digital modes (RTTY, PSK31, Olivia) 
 ## Build Commands
 
 ```bash
-# Build Swift Package (DigiModesCore)
-cd DigiModes/DigiModesCore && swift build
+# Build Swift Package (HamDigitalCore)
+cd HamDigital/HamDigitalCore && swift build
 
-# Run DigiModesCore tests
-cd DigiModes/DigiModesCore && swift test
+# Run HamDigitalCore tests
+cd HamDigital/HamDigitalCore && swift test
 
 # Build iOS app (requires Xcode)
-xcodebuild -project DigiModes/DigiModes.xcodeproj \
+xcodebuild -project HamDigital/DigiModes.xcodeproj \
   -scheme DigiModes \
   -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
   build
 
 # Generate RTTY test audio files
-cd DigiModes/DigiModesCore && swift run GenerateTestAudio
+cd HamDigital/HamDigitalCore && swift run GenerateTestAudio
 # Outputs: /tmp/rtty_single_channel.wav, /tmp/rtty_multi_channel.wav
 ```
 
 ## Architecture
 
 ### Two Codebases
-1. **DigiModes/** - iOS app (SwiftUI, requires Xcode)
-2. **DigiModesCore/** - Swift Package with core logic (buildable via CLI)
+1. **HamDigital/** - iOS app (SwiftUI, requires Xcode)
+2. **HamDigitalCore/** - Swift Package with core logic (buildable via CLI)
 
 ### Key Design Decisions
 - iOS 17+ target (uses `ObservableObject`, not `@Observable`)
@@ -40,8 +40,8 @@ cd DigiModes/DigiModesCore && swift run GenerateTestAudio
 ### File Organization
 
 ```
-DigiModes/
-├── DigiModes/                    # iOS App
+HamDigital/
+├── HamDigital/                    # iOS App
 │   ├── Models/                   # Channel, Message, DigitalMode, Station
 │   ├── Views/
 │   │   ├── Channels/             # ChannelListView, ChannelDetailView, ChannelRowView
@@ -52,9 +52,9 @@ DigiModes/
 │   ├── Services/                 # AudioService, ModemService, SettingsManager
 │   └── Config/                   # ModeConfig (enable/disable modes)
 │
-└── DigiModesCore/                # Swift Package
+└── HamDigitalCore/                # Swift Package
     ├── Sources/
-    │   ├── DigiModesCore/        # Library
+    │   ├── HamDigitalCore/        # Library
     │   │   ├── Models/           # RTTYConfiguration, RTTYChannel
     │   │   ├── Codecs/           # BaudotCodec
     │   │   └── Modems/           # RTTYModem, FSKDemodulator, MultiChannelRTTYDemodulator
@@ -79,7 +79,7 @@ DigiModes/
 **Audio Pipeline**
 - `AudioService`: AVAudioEngine with input tap and player node
 - `onAudioInput` callback routes samples to ModemService
-- `ModemService`: bridges to DigiModesCore's MultiChannelRTTYDemodulator
+- `ModemService`: bridges to HamDigitalCore's MultiChannelRTTYDemodulator
 - Decoded characters delivered via `ModemServiceDelegate`
 
 **Message TransmitState**

@@ -1,6 +1,6 @@
 //
-//  DigiModesCore.swift
-//  DigiModesCore
+//  HamDigitalCore.swift
+//  HamDigitalCore
 //
 //  Core library for amateur radio digital modes
 //

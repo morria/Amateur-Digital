@@ -21,7 +21,7 @@ The app supports full RTTY transmit and receive:
 
 ### Setup
 
-1. Open `DigiModes/DigiModes.xcodeproj` in Xcode
+1. Open `HamDigital/DigiModes.xcodeproj` in Xcode
 2. Select your development team in Signing & Capabilities
 3. Build and run on simulator or device
 
@@ -30,13 +30,13 @@ The app supports full RTTY transmit and receive:
 The core logic (models, codecs) is in a Swift Package that can be built from the command line:
 
 ```bash
-cd DigiModes/DigiModesCore
+cd HamDigital/HamDigitalCore
 swift build
 ```
 
 Tests can be run from the command line:
 ```bash
-cd DigiModes/DigiModesCore && swift test
+cd HamDigital/HamDigitalCore && swift test
 ```
 
 ### Testing with Audio Files
@@ -44,7 +44,7 @@ cd DigiModes/DigiModesCore && swift test
 Generate test RTTY audio files:
 
 ```bash
-cd DigiModes/DigiModesCore
+cd HamDigital/HamDigitalCore
 swift run GenerateTestAudio
 # Creates: /tmp/rtty_single_channel.wav (2125 Hz)
 #          /tmp/rtty_multi_channel.wav (4 channels: 1500, 1700, 1900, 2100 Hz)
@@ -90,7 +90,7 @@ afplay /tmp/rtty_single_channel.wav      # Play while app listens via mic
 ### Phase 3: RTTY Implementation ✅
 
 - [x] Baudot (ITA2) encoding/decoding tables
-- [x] FSK modulation (tone generation) - via DigiModesCore
+- [x] FSK modulation (tone generation) - via HamDigitalCore
 - [x] Bit timing for transmission
 - [x] FSK demodulation (tone detection)
 - [x] Multi-channel simultaneous decoding (8 channels)
@@ -164,9 +164,9 @@ Compatible interfaces include:
 ### Project Structure
 
 ```
-DigiModes/
+HamDigital/
 ├── DigiModes.xcodeproj/        # Xcode project (iOS app)
-├── DigiModes/                  # iOS app source
+├── HamDigital/                  # iOS app source
 │   ├── App/
 │   │   └── HamDigitalApp.swift
 │   ├── Models/                 # Channel, Message, DigitalMode, Station
@@ -179,15 +179,15 @@ DigiModes/
 │   ├── ViewModels/             # ChatViewModel
 │   ├── Services/               # AudioService, ModemService, SettingsManager, TestAudioLoader
 │   └── Config/                 # ModeConfig
-└── DigiModesCore/              # Swift Package (CLI buildable)
+└── HamDigitalCore/              # Swift Package (CLI buildable)
     ├── Package.swift
     ├── Sources/
-    │   ├── DigiModesCore/
+    │   ├── HamDigitalCore/
     │   │   ├── Models/         # RTTYConfiguration, RTTYChannel
     │   │   ├── Codecs/         # BaudotCodec
     │   │   └── Modems/         # RTTYModem, FSKDemodulator, MultiChannelRTTYDemodulator
     │   └── GenerateTestAudio/  # CLI tool for test audio files
-    └── Tests/DigiModesCoreTests/
+    └── Tests/HamDigitalCoreTests/
 ```
 
 ---

@@ -4,15 +4,15 @@
 import PackageDescription
 
 let package = Package(
-    name: "DigiModesCore",
+    name: "HamDigitalCore",
     platforms: [
         .iOS(.v16),
         .macOS(.v13)
     ],
     products: [
         .library(
-            name: "DigiModesCore",
-            targets: ["DigiModesCore"]
+            name: "HamDigitalCore",
+            targets: ["HamDigitalCore"]
         ),
         .executable(
             name: "GenerateTestAudio",
@@ -21,19 +21,19 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "DigiModesCore",
+            name: "HamDigitalCore",
             dependencies: [],
-            path: "Sources/DigiModesCore"
+            path: "Sources/HamDigitalCore"
         ),
         .executableTarget(
             name: "GenerateTestAudio",
-            dependencies: ["DigiModesCore"],
+            dependencies: ["HamDigitalCore"],
             path: "Sources/GenerateTestAudio"
         ),
         .testTarget(
-            name: "DigiModesCoreTests",
-            dependencies: ["DigiModesCore"],
-            path: "Tests/DigiModesCoreTests"
+            name: "HamDigitalCoreTests",
+            dependencies: ["HamDigitalCore"],
+            path: "Tests/HamDigitalCoreTests"
         ),
     ]
 )

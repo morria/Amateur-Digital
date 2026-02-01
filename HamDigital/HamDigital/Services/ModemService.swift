@@ -1,16 +1,16 @@
 //
 //  ModemService.swift
-//  DigiModes
+//  HamDigital
 //
 //  Digital mode modulation/demodulation service
-//  Bridges between iOS audio and DigiModesCore library
+//  Bridges between iOS audio and HamDigitalCore library
 //
 
 import Foundation
 import AVFoundation
 
-#if canImport(DigiModesCore)
-import DigiModesCore
+#if canImport(HamDigitalCore)
+import HamDigitalCore
 #endif
 
 /// Protocol for receiving decoded characters from ModemService
@@ -59,7 +59,7 @@ class ModemService: ObservableObject {
 
     // MARK: - RTTY Modem
 
-    #if canImport(DigiModesCore)
+    #if canImport(HamDigitalCore)
     private var rttyModem: RTTYModem?
     private var multiChannelDemodulator: MultiChannelRTTYDemodulator?
     #endif
@@ -69,14 +69,14 @@ class ModemService: ObservableObject {
 
     /// Whether DigiModesCore is available
     var isModemAvailable: Bool {
-        #if canImport(DigiModesCore)
+        #if canImport(HamDigitalCore)
         return rttyModem != nil
         #else
         return false
         #endif
     }
 
-    #if canImport(DigiModesCore)
+    #if canImport(HamDigitalCore)
     /// Create RTTYConfiguration from current settings
     private var currentRTTYConfiguration: RTTYConfiguration {
         RTTYConfiguration(
@@ -99,7 +99,7 @@ class ModemService: ObservableObject {
             interleaved: false
         )
 
-        #if canImport(DigiModesCore)
+        #if canImport(HamDigitalCore)
         // Create RTTY modem with settings from SettingsManager
         self.rttyModem = RTTYModem(configuration: currentRTTYConfiguration)
         setupMultiChannelDemodulator()
@@ -112,7 +112,7 @@ class ModemService: ObservableObject {
 
     /// Reconfigure modem with current settings (call when settings change)
     func reconfigureModem() {
-        #if canImport(DigiModesCore)
+        #if canImport(HamDigitalCore)
         rttyModem = RTTYModem(configuration: currentRTTYConfiguration)
         rttyModem?.delegate = self
         multiChannelDemodulator?.setSquelch(Float(settings.rttySquelch))
@@ -121,14 +121,14 @@ class ModemService: ObservableObject {
 
     /// Update squelch level for all demodulators
     func updateSquelch() {
-        #if canImport(DigiModesCore)
+        #if canImport(HamDigitalCore)
         multiChannelDemodulator?.setSquelch(Float(settings.rttySquelch))
         #endif
     }
 
     // MARK: - Setup
 
-    #if canImport(DigiModesCore)
+    #if canImport(HamDigitalCore)
     private func setupMultiChannelDemodulator() {
         // Create demodulator covering common RTTY audio frequencies
         multiChannelDemodulator = MultiChannelRTTYDemodulator.standardSubband()
@@ -145,7 +145,7 @@ class ModemService: ObservableObject {
         activeMode = mode
         print("[ModemService] Mode changed to \(mode.rawValue)")
 
-        #if canImport(DigiModesCore)
+        #if canImport(HamDigitalCore)
         rttyModem?.reset()
         #endif
     }
@@ -180,7 +180,7 @@ class ModemService: ObservableObject {
             return
         }
 
-        #if canImport(DigiModesCore)
+        #if canImport(HamDigitalCore)
         if let multiDemod = multiChannelDemodulator {
             multiDemod.process(samples: samples)
             channelFrequencies = multiDemod.channels.map { $0.frequency }
@@ -208,7 +208,7 @@ class ModemService: ObservableObject {
             return nil
         }
 
-        #if canImport(DigiModesCore)
+        #if canImport(HamDigitalCore)
         guard let modem = rttyModem else { return nil }
 
         let samples = modem.encodeWithIdle(
@@ -225,7 +225,7 @@ class ModemService: ObservableObject {
 
     /// Encode text and return raw samples
     func encodeTxSamples(_ text: String) -> [Float] {
-        #if canImport(DigiModesCore)
+        #if canImport(HamDigitalCore)
         return rttyModem?.encodeWithIdle(
             text: text,
             preambleMs: 100,
@@ -238,7 +238,7 @@ class ModemService: ObservableObject {
 
     /// Generate idle tone for carrier
     func generateIdleTone(duration: Double) -> AVAudioPCMBuffer? {
-        #if canImport(DigiModesCore)
+        #if canImport(HamDigitalCore)
         guard let modem = rttyModem else { return nil }
         let samples = modem.generateIdle(duration: duration)
         return createBuffer(from: samples)
@@ -251,14 +251,14 @@ class ModemService: ObservableObject {
 
     /// Tune to a specific frequency
     func tune(to frequency: Double) {
-        #if canImport(DigiModesCore)
+        #if canImport(HamDigitalCore)
         rttyModem?.tune(to: frequency)
         #endif
     }
 
     /// Add a channel to monitor
     func addChannel(at frequency: Double) {
-        #if canImport(DigiModesCore)
+        #if canImport(HamDigitalCore)
         guard let multiDemod = multiChannelDemodulator else { return }
         multiDemod.addChannel(at: frequency)
         channelFrequencies = multiDemod.channels.map { $0.frequency }
@@ -272,7 +272,7 @@ class ModemService: ObservableObject {
 
     /// Remove a channel by frequency
     func removeChannel(at frequency: Double) {
-        #if canImport(DigiModesCore)
+        #if canImport(HamDigitalCore)
         guard let multiDemod = multiChannelDemodulator else { return }
         if let channel = multiDemod.channel(at: frequency) {
             multiDemod.removeChannel(channel.id)
@@ -287,7 +287,7 @@ class ModemService: ObservableObject {
 
     /// Reset modem state
     func reset() {
-        #if canImport(DigiModesCore)
+        #if canImport(HamDigitalCore)
         rttyModem?.reset()
         multiChannelDemodulator?.reset()
         #endif
@@ -321,7 +321,7 @@ class ModemService: ObservableObject {
 
 // MARK: - MultiChannelRTTYDemodulatorDelegate
 
-#if canImport(DigiModesCore)
+#if canImport(HamDigitalCore)
 extension ModemService: MultiChannelRTTYDemodulatorDelegate {
     nonisolated func demodulator(
         _ demodulator: MultiChannelRTTYDemodulator,

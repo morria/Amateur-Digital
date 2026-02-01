@@ -4,7 +4,7 @@
 //
 
 import Foundation
-import DigiModesCore
+import HamDigitalCore
 
 // MARK: - Audio File Generation
 

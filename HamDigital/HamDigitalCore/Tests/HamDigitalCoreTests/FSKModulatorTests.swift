@@ -4,7 +4,7 @@
 //
 
 import XCTest
-@testable import DigiModesCore
+@testable import HamDigitalCore
 
 final class FSKModulatorTests: XCTestCase {
 
