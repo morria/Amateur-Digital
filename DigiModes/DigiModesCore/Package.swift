@@ -14,12 +14,21 @@ let package = Package(
             name: "DigiModesCore",
             targets: ["DigiModesCore"]
         ),
+        .executable(
+            name: "GenerateTestAudio",
+            targets: ["GenerateTestAudio"]
+        ),
     ],
     targets: [
         .target(
             name: "DigiModesCore",
             dependencies: [],
             path: "Sources/DigiModesCore"
+        ),
+        .executableTarget(
+            name: "GenerateTestAudio",
+            dependencies: ["DigiModesCore"],
+            path: "Sources/GenerateTestAudio"
         ),
         .testTarget(
             name: "DigiModesCoreTests",

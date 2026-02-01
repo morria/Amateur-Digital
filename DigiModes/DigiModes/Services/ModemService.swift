@@ -35,6 +35,7 @@ protocol ModemServiceDelegate: AnyObject {
 /// Bridges between iOS audio (AVAudioPCMBuffer) and the DigiModesCore library.
 /// Currently supports RTTY with multi-channel decoding.
 ///
+/// Uses settings from SettingsManager for baud rate, mark frequency, and shift.
 /// When DigiModesCore is not available, this service operates in placeholder mode.
 @MainActor
 class ModemService: ObservableObject {
@@ -51,6 +52,10 @@ class ModemService: ObservableObject {
     // MARK: - Delegate
 
     weak var delegate: ModemServiceDelegate?
+
+    // MARK: - Settings
+
+    private let settings = SettingsManager.shared
 
     // MARK: - RTTY Modem
 
@@ -71,6 +76,18 @@ class ModemService: ObservableObject {
         #endif
     }
 
+    #if canImport(DigiModesCore)
+    /// Create RTTYConfiguration from current settings
+    private var currentRTTYConfiguration: RTTYConfiguration {
+        RTTYConfiguration(
+            baudRate: settings.rttyBaudRate,
+            markFrequency: settings.rttyMarkFreq,
+            shift: settings.rttyShift,
+            sampleRate: 48000.0
+        )
+    }
+    #endif
+
     // MARK: - Initialization
 
     init() {
@@ -83,13 +100,21 @@ class ModemService: ObservableObject {
         )
 
         #if canImport(DigiModesCore)
-        // Create RTTY modem with standard configuration
-        self.rttyModem = RTTYModem(configuration: .standard)
+        // Create RTTY modem with settings from SettingsManager
+        self.rttyModem = RTTYModem(configuration: currentRTTYConfiguration)
         setupMultiChannelDemodulator()
         #else
         print("[ModemService] DigiModesCore not available - running in placeholder mode")
         // Setup default channel frequencies for placeholder mode
         channelFrequencies = [1275, 1445, 1615, 1785, 1955, 2125, 2295, 2465]
+        #endif
+    }
+
+    /// Reconfigure modem with current settings (call when settings change)
+    func reconfigureModem() {
+        #if canImport(DigiModesCore)
+        rttyModem = RTTYModem(configuration: currentRTTYConfiguration)
+        rttyModem?.delegate = self
         #endif
     }
 
