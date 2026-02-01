@@ -23,14 +23,43 @@ struct ChannelDetailView: View {
         viewModel.channels.first { $0.id == channelID }
     }
 
-    /// CQ calling message placeholder based on user's callsign and grid
+    /// Whether the channel frequency is safe for USB transmission
+    private var isFrequencySafe: Bool {
+        guard let channel = channel else { return false }
+        return viewModel.isFrequencySafeForTransmission(channel.frequency)
+    }
+
+    /// CQ calling message placeholder based on user's callsign, grid, and mode
     private var cqPlaceholder: String {
         let call = settings.callsign
         let grid = settings.effectiveGrid
-        if grid.isEmpty {
-            return "CQ CQ CQ DE \(call) \(call) K"
+
+        switch viewModel.selectedMode {
+        case .rtty:
+            // RTTY is uppercase only (Baudot limitation)
+            if grid.isEmpty {
+                return "CQ CQ CQ DE \(call) \(call) K"
+            }
+            return "CQ CQ CQ DE \(call) \(call) \(grid) K"
+
+        case .psk31, .bpsk63, .qpsk31, .qpsk63:
+            // PSK modes typically use mixed case and "pse k" convention
+            let lowerCall = call.lowercased()
+            let lowerGrid = grid.lowercased()
+            if grid.isEmpty {
+                return "cq cq cq de \(lowerCall) \(lowerCall) pse k"
+            }
+            return "cq cq cq de \(lowerCall) \(lowerCall) \(lowerGrid) pse k"
+
+        case .olivia:
+            // Olivia also supports mixed case
+            let lowerCall = call.lowercased()
+            let lowerGrid = grid.lowercased()
+            if grid.isEmpty {
+                return "cq cq de \(lowerCall) \(lowerCall) k"
+            }
+            return "cq cq de \(lowerCall) \(lowerCall) \(lowerGrid) k"
         }
-        return "CQ CQ CQ DE \(call) \(call) \(grid) K"
     }
 
     init(channel: Channel) {
@@ -100,6 +129,37 @@ struct ChannelDetailView: View {
                         .background(Color.red.opacity(0.1))
                     }
 
+                    // Frequency warning
+                    if let warning = viewModel.frequencyWarning {
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                            Text(warning)
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                            Spacer()
+                            Button("Dismiss") {
+                                viewModel.frequencyWarning = nil
+                            }
+                            .font(.caption)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.orange.opacity(0.1))
+                    } else if !isFrequencySafe {
+                        HStack {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                            Text("Frequency outside safe USB range (\(ChatViewModel.minSafeFrequency)-\(ChatViewModel.maxSafeFrequency) Hz)")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.orange.opacity(0.1))
+                    }
+
                     HStack(spacing: 12) {
                         TextField(cqPlaceholder, text: $messageText, axis: .vertical)
                             .textFieldStyle(.plain)
@@ -110,7 +170,7 @@ struct ChannelDetailView: View {
                             .cornerRadius(20)
                             .lineLimit(1...5)
                             .focused($isTextFieldFocused)
-                            .textInputAutocapitalization(.characters)
+                            .textInputAutocapitalization(viewModel.selectedMode == .rtty ? .characters : .never)
                             .autocorrectionDisabled(true)
 
                         Button {
@@ -122,16 +182,26 @@ struct ChannelDetailView: View {
                         } label: {
                             Image(systemName: viewModel.isTransmitting ? "stop.fill" : "arrow.up.circle.fill")
                                 .font(.system(size: 32))
-                                .foregroundColor(viewModel.isTransmitting ? .red : .blue)
+                                .foregroundColor(viewModel.isTransmitting ? .red : (isFrequencySafe ? .blue : .gray))
                         }
-                        .disabled(viewModel.isTransmitting == false && messageText.isEmpty && cqPlaceholder.isEmpty)
+                        .disabled(!isFrequencySafe || (viewModel.isTransmitting == false && messageText.isEmpty && cqPlaceholder.isEmpty))
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                 }
             }
-            .navigationTitle(channel.frequencyOffsetDisplay)
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 2) {
+                        Text(viewModel.selectedMode.rawValue.uppercased())
+                            .font(.headline)
+                        Text(channel.frequencyOffsetDisplay)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
         } else {
             ContentUnavailableView("Channel Deleted", systemImage: "trash")
         }

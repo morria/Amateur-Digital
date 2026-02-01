@@ -13,7 +13,10 @@ enum ModeConfig {
     /// Set of enabled digital modes
     static let enabledModes: Set<DigitalMode> = [
         .rtty,
-        // .psk31,    // Not yet implemented
+        .psk31,
+        .bpsk63,
+        .qpsk31,
+        .qpsk63,
         // .olivia,   // Not yet implemented
     ]
 

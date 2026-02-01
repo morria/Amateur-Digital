@@ -19,14 +19,16 @@ protocol ModemServiceDelegate: AnyObject {
     func modemService(
         _ service: ModemService,
         didDecode character: Character,
-        onChannel frequency: Double
+        onChannel frequency: Double,
+        mode: DigitalMode
     )
 
     /// Called when signal detection changes
     func modemService(
         _ service: ModemService,
         signalDetected: Bool,
-        onChannel frequency: Double
+        onChannel frequency: Double,
+        mode: DigitalMode
     )
 }
 
@@ -62,6 +64,11 @@ class ModemService: ObservableObject {
     #if canImport(HamDigitalCore)
     private var rttyModem: RTTYModem?
     private var multiChannelDemodulator: MultiChannelRTTYDemodulator?
+
+    // MARK: - PSK Modem (supports PSK31, BPSK63, QPSK31, QPSK63)
+
+    private var pskModem: PSKModem?
+    private var multiChannelPSKDemodulator: MultiChannelPSKDemodulator?
     #endif
 
     /// Audio format for processing (48kHz mono Float32)
@@ -86,6 +93,24 @@ class ModemService: ObservableObject {
             sampleRate: 48000.0
         )
     }
+
+    /// Create PSKConfiguration for the current active mode
+    private var currentPSKConfiguration: PSKConfiguration {
+        let baseConfig: PSKConfiguration
+        switch activeMode {
+        case .psk31:
+            baseConfig = .psk31
+        case .bpsk63:
+            baseConfig = .bpsk63
+        case .qpsk31:
+            baseConfig = .qpsk31
+        case .qpsk63:
+            baseConfig = .qpsk63
+        default:
+            baseConfig = .psk31
+        }
+        return baseConfig.withCenterFrequency(settings.psk31CenterFreq)
+    }
     #endif
 
     // MARK: - Initialization
@@ -103,6 +128,10 @@ class ModemService: ObservableObject {
         // Create RTTY modem with settings from SettingsManager
         self.rttyModem = RTTYModem(configuration: currentRTTYConfiguration)
         setupMultiChannelDemodulator()
+
+        // Create PSK modem (default to PSK31)
+        self.pskModem = PSKModem(configuration: currentPSKConfiguration)
+        setupMultiChannelPSKDemodulator()
         #else
         print("[ModemService] DigiModesCore not available - running in placeholder mode")
         // Setup default channel frequencies for placeholder mode
@@ -116,6 +145,10 @@ class ModemService: ObservableObject {
         rttyModem = RTTYModem(configuration: currentRTTYConfiguration)
         rttyModem?.delegate = self
         multiChannelDemodulator?.setSquelch(Float(settings.rttySquelch))
+
+        pskModem = PSKModem(configuration: currentPSKConfiguration)
+        pskModem?.delegate = self
+        multiChannelPSKDemodulator?.setSquelch(Float(settings.psk31Squelch))
         #endif
     }
 
@@ -123,6 +156,7 @@ class ModemService: ObservableObject {
     func updateSquelch() {
         #if canImport(HamDigitalCore)
         multiChannelDemodulator?.setSquelch(Float(settings.rttySquelch))
+        multiChannelPSKDemodulator?.setSquelch(Float(settings.psk31Squelch))
         #endif
     }
 
@@ -136,6 +170,13 @@ class ModemService: ObservableObject {
         multiChannelDemodulator?.setSquelch(Float(settings.rttySquelch))
         channelFrequencies = multiChannelDemodulator?.channels.map { $0.frequency } ?? []
     }
+
+    private func setupMultiChannelPSKDemodulator() {
+        // Create demodulator covering common PSK audio frequencies
+        multiChannelPSKDemodulator = MultiChannelPSKDemodulator.standardSubband(configuration: currentPSKConfiguration)
+        multiChannelPSKDemodulator?.delegate = self
+        multiChannelPSKDemodulator?.setSquelch(Float(settings.psk31Squelch))
+    }
     #endif
 
     // MARK: - Mode Selection
@@ -146,7 +187,25 @@ class ModemService: ObservableObject {
         print("[ModemService] Mode changed to \(mode.rawValue)")
 
         #if canImport(HamDigitalCore)
-        rttyModem?.reset()
+        // Update channel frequencies based on mode
+        switch mode {
+        case .rtty:
+            channelFrequencies = multiChannelDemodulator?.channels.map { $0.frequency } ?? []
+            rttyModem?.reset()
+            multiChannelDemodulator?.reset()
+        case .psk31, .bpsk63, .qpsk31, .qpsk63:
+            // Reconfigure PSK modem for the new mode
+            pskModem = PSKModem(configuration: currentPSKConfiguration)
+            pskModem?.delegate = self
+            // Recreate multi-channel demodulator with new configuration
+            multiChannelPSKDemodulator = MultiChannelPSKDemodulator.standardSubband(configuration: currentPSKConfiguration)
+            multiChannelPSKDemodulator?.delegate = self
+            multiChannelPSKDemodulator?.setSquelch(Float(settings.psk31Squelch))
+            channelFrequencies = multiChannelPSKDemodulator?.channels.map { $0.frequency } ?? []
+        case .olivia:
+            // Not yet implemented
+            break
+        }
         #endif
     }
 
@@ -159,11 +218,6 @@ class ModemService: ObservableObject {
     ///
     /// - Parameter buffer: Audio buffer to process
     func processRxAudio(_ buffer: AVAudioPCMBuffer) {
-        guard activeMode == .rtty else {
-            // TODO: Add support for other modes
-            return
-        }
-
         guard let floatData = buffer.floatChannelData?[0] else {
             return
         }
@@ -176,20 +230,32 @@ class ModemService: ObservableObject {
 
     /// Process raw Float array samples
     func processRxSamples(_ samples: [Float]) {
-        guard activeMode == .rtty else {
-            return
-        }
-
         #if canImport(HamDigitalCore)
-        if let multiDemod = multiChannelDemodulator {
-            multiDemod.process(samples: samples)
-            channelFrequencies = multiDemod.channels.map { $0.frequency }
-        } else {
-            rttyModem?.process(samples: samples)
-        }
+        switch activeMode {
+        case .rtty:
+            if let multiDemod = multiChannelDemodulator {
+                multiDemod.process(samples: samples)
+                channelFrequencies = multiDemod.channels.map { $0.frequency }
+            } else {
+                rttyModem?.process(samples: samples)
+            }
+            signalStrength = rttyModem?.signalStrength ?? 0
+            isDecoding = rttyModem?.isSignalDetected ?? false
 
-        signalStrength = rttyModem?.signalStrength ?? 0
-        isDecoding = rttyModem?.isSignalDetected ?? false
+        case .psk31, .bpsk63, .qpsk31, .qpsk63:
+            if let multiDemod = multiChannelPSKDemodulator {
+                multiDemod.process(samples: samples)
+                channelFrequencies = multiDemod.channels.map { $0.frequency }
+            } else {
+                pskModem?.process(samples: samples)
+            }
+            signalStrength = pskModem?.signalStrength ?? 0
+            isDecoding = pskModem?.isSignalDetected ?? false
+
+        case .olivia:
+            // Not yet implemented
+            break
+        }
         #endif
     }
 
@@ -197,25 +263,36 @@ class ModemService: ObservableObject {
 
     /// Encode text for transmission
     ///
-    /// Returns an audio buffer containing the encoded RTTY signal
+    /// Returns an audio buffer containing the encoded signal
     /// ready to be played through the audio output.
     ///
     /// - Parameter text: Text to encode
     /// - Returns: Audio buffer, or nil if encoding fails
     func encodeTxText(_ text: String) -> AVAudioPCMBuffer? {
-        guard activeMode == .rtty else {
-            // TODO: Add support for other modes
+        #if canImport(HamDigitalCore)
+        var samples: [Float] = []
+
+        switch activeMode {
+        case .rtty:
+            guard let modem = rttyModem else { return nil }
+            samples = modem.encodeWithIdle(
+                text: text,
+                preambleMs: 100,
+                postambleMs: 50
+            )
+
+        case .psk31, .bpsk63, .qpsk31, .qpsk63:
+            guard let modem = pskModem else { return nil }
+            samples = modem.encodeWithEnvelope(
+                text: text,
+                preambleMs: 100,
+                postambleMs: 50
+            )
+
+        case .olivia:
+            // Not yet implemented
             return nil
         }
-
-        #if canImport(HamDigitalCore)
-        guard let modem = rttyModem else { return nil }
-
-        let samples = modem.encodeWithIdle(
-            text: text,
-            preambleMs: 100,
-            postambleMs: 50
-        )
 
         return createBuffer(from: samples)
         #else
@@ -226,11 +303,24 @@ class ModemService: ObservableObject {
     /// Encode text and return raw samples
     func encodeTxSamples(_ text: String) -> [Float] {
         #if canImport(HamDigitalCore)
-        return rttyModem?.encodeWithIdle(
-            text: text,
-            preambleMs: 100,
-            postambleMs: 50
-        ) ?? []
+        switch activeMode {
+        case .rtty:
+            return rttyModem?.encodeWithIdle(
+                text: text,
+                preambleMs: 100,
+                postambleMs: 50
+            ) ?? []
+
+        case .psk31, .bpsk63, .qpsk31, .qpsk63:
+            return pskModem?.encodeWithEnvelope(
+                text: text,
+                preambleMs: 100,
+                postambleMs: 50
+            ) ?? []
+
+        case .olivia:
+            return []
+        }
         #else
         return []
         #endif
@@ -239,8 +329,21 @@ class ModemService: ObservableObject {
     /// Generate idle tone for carrier
     func generateIdleTone(duration: Double) -> AVAudioPCMBuffer? {
         #if canImport(HamDigitalCore)
-        guard let modem = rttyModem else { return nil }
-        let samples = modem.generateIdle(duration: duration)
+        var samples: [Float] = []
+
+        switch activeMode {
+        case .rtty:
+            guard let modem = rttyModem else { return nil }
+            samples = modem.generateIdle(duration: duration)
+
+        case .psk31, .bpsk63, .qpsk31, .qpsk63:
+            guard let modem = pskModem else { return nil }
+            samples = modem.generateIdle(duration: duration)
+
+        case .olivia:
+            return nil
+        }
+
         return createBuffer(from: samples)
         #else
         return nil
@@ -290,6 +393,8 @@ class ModemService: ObservableObject {
         #if canImport(HamDigitalCore)
         rttyModem?.reset()
         multiChannelDemodulator?.reset()
+        pskModem?.reset()
+        multiChannelPSKDemodulator?.reset()
         #endif
         signalStrength = 0
         isDecoding = false
@@ -329,7 +434,7 @@ extension ModemService: MultiChannelRTTYDemodulatorDelegate {
         onChannel channel: RTTYChannel
     ) {
         Task { @MainActor in
-            delegate?.modemService(self, didDecode: character, onChannel: channel.frequency)
+            delegate?.modemService(self, didDecode: character, onChannel: channel.frequency, mode: .rtty)
         }
     }
 
@@ -339,7 +444,7 @@ extension ModemService: MultiChannelRTTYDemodulatorDelegate {
         onChannel channel: RTTYChannel
     ) {
         Task { @MainActor in
-            delegate?.modemService(self, signalDetected: detected, onChannel: channel.frequency)
+            delegate?.modemService(self, signalDetected: detected, onChannel: channel.frequency, mode: .rtty)
         }
     }
 
@@ -362,7 +467,7 @@ extension ModemService: RTTYModemDelegate {
         atFrequency frequency: Double
     ) {
         Task { @MainActor in
-            delegate?.modemService(self, didDecode: character, onChannel: frequency)
+            delegate?.modemService(self, didDecode: character, onChannel: frequency, mode: .rtty)
         }
     }
 
@@ -373,7 +478,65 @@ extension ModemService: RTTYModemDelegate {
     ) {
         Task { @MainActor in
             self.isDecoding = detected
-            delegate?.modemService(self, signalDetected: detected, onChannel: frequency)
+            delegate?.modemService(self, signalDetected: detected, onChannel: frequency, mode: .rtty)
+        }
+    }
+}
+
+// MARK: - MultiChannelPSKDemodulatorDelegate
+
+extension ModemService: MultiChannelPSKDemodulatorDelegate {
+    nonisolated func demodulator(
+        _ demodulator: MultiChannelPSKDemodulator,
+        didDecode character: Character,
+        onChannel channel: PSKChannel
+    ) {
+        Task { @MainActor in
+            delegate?.modemService(self, didDecode: character, onChannel: channel.frequency, mode: self.activeMode)
+        }
+    }
+
+    nonisolated func demodulator(
+        _ demodulator: MultiChannelPSKDemodulator,
+        signalDetected detected: Bool,
+        onChannel channel: PSKChannel
+    ) {
+        Task { @MainActor in
+            delegate?.modemService(self, signalDetected: detected, onChannel: channel.frequency, mode: self.activeMode)
+        }
+    }
+
+    nonisolated func demodulator(
+        _ demodulator: MultiChannelPSKDemodulator,
+        didUpdateChannels updatedChannels: [PSKChannel]
+    ) {
+        Task { @MainActor in
+            self.channelFrequencies = updatedChannels.map { $0.frequency }
+        }
+    }
+}
+
+// MARK: - PSKModemDelegate for Single-Channel Mode
+
+extension ModemService: PSKModemDelegate {
+    nonisolated func modem(
+        _ modem: PSKModem,
+        didDecode character: Character,
+        atFrequency frequency: Double
+    ) {
+        Task { @MainActor in
+            delegate?.modemService(self, didDecode: character, onChannel: frequency, mode: self.activeMode)
+        }
+    }
+
+    nonisolated func modem(
+        _ modem: PSKModem,
+        signalDetected detected: Bool,
+        atFrequency frequency: Double
+    ) {
+        Task { @MainActor in
+            self.isDecoding = detected
+            delegate?.modemService(self, signalDetected: detected, onChannel: frequency, mode: self.activeMode)
         }
     }
 }
