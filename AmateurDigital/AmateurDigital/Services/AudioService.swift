@@ -22,6 +22,7 @@ class AudioService: ObservableObject, @unchecked Sendable {
     @Published var sampleRate: Double = 48000.0
     @Published var isPlaying: Bool = false
     @Published var isListening: Bool = false
+    @Published var inputLevel: Float = 0.0
 
     /// Output gain multiplier (1.0 = unity, 2.0 = +6dB, etc.)
     /// Increase if output level is too low for VOX
@@ -173,8 +174,16 @@ class AudioService: ObservableObject, @unchecked Sendable {
             }
         }
 
-        // Call the callback on main thread
+        // Calculate RMS level for metering
+        var sumOfSquares: Float = 0
+        for sample in samples {
+            sumOfSquares += sample * sample
+        }
+        let rmsLevel = sqrt(sumOfSquares / Float(samples.count))
+
+        // Call the callback on main thread and update input level
         DispatchQueue.main.async { [weak self] in
+            self?.inputLevel = rmsLevel
             self?.onAudioInput?(samples)
         }
     }
@@ -284,9 +293,9 @@ class AudioService: ObservableObject, @unchecked Sendable {
         try await playBuffer(buffer)
     }
 
-    /// Get current input audio buffer for decoding (future implementation)
+    /// Get current input audio buffer for decoding
+    /// Note: Input is processed via the onAudioInput callback installed in start()
     func getInputBuffer() -> AVAudioPCMBuffer? {
-        // TODO: Implement input tap for RX audio
         return nil
     }
 

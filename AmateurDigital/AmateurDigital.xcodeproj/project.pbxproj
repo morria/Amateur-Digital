@@ -23,6 +23,7 @@
 		A10000000000000000000015 /* ModemService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* ModemService.swift */; };
 		A10000000000000000000016 /* Constants.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* Constants.swift */; };
 		A10000000000000000000017 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* Assets.xcassets */; };
+		A10000000000000000000028 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000028 /* PrivacyInfo.xcprivacy */; };
 		A10000000000000000000018 /* ChannelListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000018 /* ChannelListView.swift */; };
 		A10000000000000000000019 /* ChannelRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000019 /* ChannelRowView.swift */; };
 		A10000000000000000000020 /* ChannelDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000020 /* ChannelDetailView.swift */; };
@@ -58,6 +59,7 @@
 		A20000000000000000000023 /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsManager.swift; sourceTree = "<group>"; };
 		A20000000000000000000024 /* ModeConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeConfig.swift; sourceTree = "<group>"; };
 		A20000000000000000000025 /* AmateurDigital.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AmateurDigital.entitlements; sourceTree = "<group>"; };
+		A20000000000000000000028 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A30000000000000000000001 /* AmateurDigital.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AmateurDigital.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -86,6 +88,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000025 /* AmateurDigital.entitlements */,
+				A20000000000000000000028 /* PrivacyInfo.xcprivacy */,
 				A50000000000000000000004 /* App */,
 				A50000000000000000000016 /* Config */,
 				A50000000000000000000005 /* Models */,
@@ -289,6 +292,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000017 /* Assets.xcassets in Resources */,
+				A10000000000000000000028 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -471,7 +475,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.AmateurDigital;
+				PRODUCT_BUNDLE_IDENTIFIER = com.w2asm.AmateurDigital;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -504,7 +508,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.example.AmateurDigital;
+				PRODUCT_BUNDLE_IDENTIFIER = com.w2asm.AmateurDigital;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;

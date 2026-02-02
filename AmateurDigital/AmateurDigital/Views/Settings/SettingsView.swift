@@ -467,6 +467,9 @@ class AudioMeterModel: ObservableObject {
     private var sampleTask: Task<Void, Never>?
     private var displayTask: Task<Void, Never>?
 
+    // Audio service for real input levels
+    private let audioService = AudioService()
+
     // Smoothing parameters
     private let smoothingFactor: CGFloat = 0.3  // Higher = more responsive, lower = smoother
 
@@ -474,14 +477,20 @@ class AudioMeterModel: ObservableObject {
         guard !isMonitoring else { return }
         isMonitoring = true
 
+        // Start the audio service to get real input levels
+        Task {
+            do {
+                try await audioService.start()
+            } catch {
+                print("[AudioMeterModel] Failed to start audio: \(error)")
+            }
+        }
+
         // Sample audio frequently (for accurate peak detection)
         sampleTask = Task {
             while isMonitoring {
-                // TODO: Replace with real AVAudioEngine input metering
-                // For now, simulate audio levels for UI development
-                let baseLevel = Double.random(in: 0.15...0.35)
-                let noise = Double.random(in: -0.05...0.05)
-                let level = min(1.0, max(0.0, baseLevel + noise))
+                // Use real input level from AudioService
+                let level = Double(audioService.inputLevel)
 
                 rawLevel = CGFloat(level)
                 rawDecibels = 20 * log10(max(level, 0.001))
@@ -516,6 +525,7 @@ class AudioMeterModel: ObservableObject {
         displayTask?.cancel()
         sampleTask = nil
         displayTask = nil
+        audioService.stop()
     }
 }
 
