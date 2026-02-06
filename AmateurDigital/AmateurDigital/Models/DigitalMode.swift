@@ -41,17 +41,17 @@ enum DigitalMode: String, CaseIterable, Identifiable {
     var description: String {
         switch self {
         case .rtty:
-            return "Classic radio teletype using 5-bit Baudot code. Robust and widely used."
+            return String(localized: "Classic radio teletype using 5-bit Baudot code. Robust and widely used.")
         case .psk31:
-            return "Narrowband PSK for keyboard-to-keyboard chats. Very efficient."
+            return String(localized: "Narrowband PSK for keyboard-to-keyboard chats. Very efficient.")
         case .bpsk63:
-            return "Faster PSK mode at 2x speed. Good for stronger signals."
+            return String(localized: "Faster PSK mode at 2x speed. Good for stronger signals.")
         case .qpsk31:
-            return "Four-phase PSK with 2x throughput. Better for good conditions."
+            return String(localized: "Four-phase PSK with 2x throughput. Better for good conditions.")
         case .qpsk63:
-            return "Fastest PSK variant at 4x throughput. Best signal required."
+            return String(localized: "Fastest PSK variant at 4x throughput. Best signal required.")
         case .olivia:
-            return "Multi-tone MFSK with excellent weak signal performance."
+            return String(localized: "Multi-tone MFSK with excellent weak signal performance.")
         }
     }
 

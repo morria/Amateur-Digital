@@ -25,9 +25,9 @@ struct SettingsView: View {
     /// Title based on whether we're filtering
     private var navigationTitle: String {
         if let mode = filterMode {
-            return "\(mode.displayName) Settings"
+            return String(localized: "\(mode.displayName) Settings")
         }
-        return "Settings"
+        return String(localized: "Settings")
     }
 
     var body: some View {
@@ -347,15 +347,15 @@ struct SettingsView: View {
     private var locationStatusText: String {
         switch settings.locationStatus {
         case .unknown:
-            return "Unknown"
+            return String(localized: "Unknown")
         case .denied:
-            return "Access Denied"
+            return String(localized: "Access Denied")
         case .updating:
-            return "Updating..."
+            return String(localized: "Updating...")
         case .current:
             return "—"
         case .error(let message):
-            return "Error: \(message)"
+            return String(localized: "Error: \(message)")
         }
     }
 }
@@ -691,7 +691,7 @@ enum FrequencyReference {
             rttyFreq: "1.800-1.810",
             pskFreq: "1.838",
             oliviaFreq: "1.838",
-            notes: "Night-time band, long-range"
+            notes: String(localized: "Night-time band, long-range")
         ),
         AmateurBand(
             name: "80m",
@@ -699,7 +699,7 @@ enum FrequencyReference {
             rttyFreq: "3.580-3.600",
             pskFreq: "3.580",
             oliviaFreq: "3.583",
-            notes: "Best at night, regional"
+            notes: String(localized: "Best at night, regional")
         ),
         AmateurBand(
             name: "40m",
@@ -707,7 +707,7 @@ enum FrequencyReference {
             rttyFreq: "7.080-7.100",
             pskFreq: "7.070",
             oliviaFreq: "7.073",
-            notes: "Day/night, very popular"
+            notes: String(localized: "Day/night, very popular")
         ),
         AmateurBand(
             name: "30m",
@@ -715,7 +715,7 @@ enum FrequencyReference {
             rttyFreq: "10.140-10.150",
             pskFreq: "10.142",
             oliviaFreq: "10.145",
-            notes: "WARC band, no contests"
+            notes: String(localized: "WARC band, no contests")
         ),
         AmateurBand(
             name: "20m",
@@ -723,7 +723,7 @@ enum FrequencyReference {
             rttyFreq: "14.080-14.099",
             pskFreq: "14.070",
             oliviaFreq: "14.073",
-            notes: "Primary DX band, daytime"
+            notes: String(localized: "Primary DX band, daytime")
         ),
         AmateurBand(
             name: "17m",
@@ -731,7 +731,7 @@ enum FrequencyReference {
             rttyFreq: "18.100-18.109",
             pskFreq: "18.100",
             oliviaFreq: "18.103",
-            notes: "WARC band, daytime"
+            notes: String(localized: "WARC band, daytime")
         ),
         AmateurBand(
             name: "15m",
@@ -739,7 +739,7 @@ enum FrequencyReference {
             rttyFreq: "21.080-21.100",
             pskFreq: "21.070",
             oliviaFreq: "21.073",
-            notes: "Daytime, solar-dependent"
+            notes: String(localized: "Daytime, solar-dependent")
         ),
         AmateurBand(
             name: "12m",
@@ -747,7 +747,7 @@ enum FrequencyReference {
             rttyFreq: "24.920-24.929",
             pskFreq: "24.920",
             oliviaFreq: "24.923",
-            notes: "WARC band, solar-dependent"
+            notes: String(localized: "WARC band, solar-dependent")
         ),
         AmateurBand(
             name: "10m",
@@ -755,7 +755,7 @@ enum FrequencyReference {
             rttyFreq: "28.080-28.100",
             pskFreq: "28.120",
             oliviaFreq: "28.123",
-            notes: "Daytime, solar maximum"
+            notes: String(localized: "Daytime, solar maximum")
         ),
         AmateurBand(
             name: "6m",
@@ -763,7 +763,7 @@ enum FrequencyReference {
             rttyFreq: nil,
             pskFreq: "50.290",
             oliviaFreq: "50.293",
-            notes: "Sporadic E propagation"
+            notes: String(localized: "Sporadic E propagation")
         )
     ]
 
@@ -794,9 +794,9 @@ struct FrequencyReferenceView: View {
 
     private var navigationTitle: String {
         if let mode = filterMode {
-            return "\(mode.displayName) Frequencies"
+            return String(localized: "\(mode.displayName) Frequencies")
         }
-        return "Band Frequencies"
+        return String(localized: "Band Frequencies")
     }
 
     var body: some View {

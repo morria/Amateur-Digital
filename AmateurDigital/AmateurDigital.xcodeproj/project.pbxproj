@@ -32,6 +32,12 @@
 		A10000000000000000000023 /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000023 /* SettingsManager.swift */; };
 		A10000000000000000000024 /* ModeConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000024 /* ModeConfig.swift */; };
 		A10000000000000000000027 /* ModeSelectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000027 /* ModeSelectionView.swift */; };
+		A10000000000000000000029 /* AdaptiveContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000029 /* AdaptiveContentView.swift */; };
+		A10000000000000000000030 /* PhoneNavigationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000030 /* PhoneNavigationView.swift */; };
+		A10000000000000000000031 /* iPadNavigationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000031 /* iPadNavigationView.swift */; };
+		A10000000000000000000032 /* ModeSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000032 /* ModeSidebarView.swift */; };
+		A10000000000000000000033 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000033 /* Localizable.xcstrings */; };
+		A10000000000000000000034 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000034 /* InfoPlist.xcstrings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -60,6 +66,12 @@
 		A20000000000000000000024 /* ModeConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeConfig.swift; sourceTree = "<group>"; };
 		A20000000000000000000025 /* AmateurDigital.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AmateurDigital.entitlements; sourceTree = "<group>"; };
 		A20000000000000000000028 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A20000000000000000000029 /* AdaptiveContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveContentView.swift; sourceTree = "<group>"; };
+		A20000000000000000000030 /* PhoneNavigationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneNavigationView.swift; sourceTree = "<group>"; };
+		A20000000000000000000031 /* iPadNavigationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iPadNavigationView.swift; sourceTree = "<group>"; };
+		A20000000000000000000032 /* ModeSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeSidebarView.swift; sourceTree = "<group>"; };
+		A20000000000000000000033 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		A20000000000000000000034 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
 		A30000000000000000000001 /* AmateurDigital.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AmateurDigital.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -140,6 +152,9 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000002 /* ContentView.swift */,
+				A20000000000000000000029 /* AdaptiveContentView.swift */,
+				A20000000000000000000030 /* PhoneNavigationView.swift */,
+				A20000000000000000000031 /* iPadNavigationView.swift */,
 				A20000000000000000000027 /* ModeSelectionView.swift */,
 				A50000000000000000000014 /* Channels */,
 				A50000000000000000000011 /* Chat */,
@@ -179,6 +194,8 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000017 /* Assets.xcassets */,
+				A20000000000000000000033 /* Localizable.xcstrings */,
+				A20000000000000000000034 /* InfoPlist.xcstrings */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -216,6 +233,7 @@
 				A20000000000000000000018 /* ChannelListView.swift */,
 				A20000000000000000000019 /* ChannelRowView.swift */,
 				A20000000000000000000020 /* ChannelDetailView.swift */,
+				A20000000000000000000032 /* ModeSidebarView.swift */,
 			);
 			path = Channels;
 			sourceTree = "<group>";
@@ -272,6 +290,14 @@
 			knownRegions = (
 				en,
 				Base,
+				es,
+				"zh-Hans",
+				ja,
+				fr,
+				de,
+				"pt-BR",
+				ko,
+				it,
 			);
 			mainGroup = A50000000000000000000001;
 			packageReferences = (
@@ -293,6 +319,8 @@
 			files = (
 				A10000000000000000000017 /* Assets.xcassets in Resources */,
 				A10000000000000000000028 /* PrivacyInfo.xcprivacy in Resources */,
+				A10000000000000000000033 /* Localizable.xcstrings in Resources */,
+				A10000000000000000000034 /* InfoPlist.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -305,6 +333,9 @@
 			files = (
 				A10000000000000000000001 /* AmateurDigitalApp.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
+				A10000000000000000000029 /* AdaptiveContentView.swift in Sources */,
+				A10000000000000000000030 /* PhoneNavigationView.swift in Sources */,
+				A10000000000000000000031 /* iPadNavigationView.swift in Sources */,
 				A10000000000000000000027 /* ModeSelectionView.swift in Sources */,
 				A10000000000000000000003 /* Message.swift in Sources */,
 				A10000000000000000000004 /* DigitalMode.swift in Sources */,
@@ -323,6 +354,7 @@
 				A10000000000000000000018 /* ChannelListView.swift in Sources */,
 				A10000000000000000000019 /* ChannelRowView.swift in Sources */,
 				A10000000000000000000020 /* ChannelDetailView.swift in Sources */,
+				A10000000000000000000032 /* ModeSidebarView.swift in Sources */,
 				A10000000000000000000023 /* SettingsManager.swift in Sources */,
 				A10000000000000000000024 /* ModeConfig.swift in Sources */,
 			);

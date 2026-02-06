@@ -7,6 +7,7 @@ import Foundation
 import SwiftUI
 import Combine
 import AVFoundation
+import UIKit
 
 @MainActor
 class ChatViewModel: ObservableObject {
@@ -104,13 +105,26 @@ class ChatViewModel: ObservableObject {
         }
     }
 
+    deinit {
+        // Ensure idle timer is re-enabled when view model is deallocated
+        // Must dispatch to main thread since deinit may run on any thread
+        DispatchQueue.main.async {
+            UIApplication.shared.isIdleTimerDisabled = false
+        }
+    }
+
     /// Start or restart the audio service
     func startAudioService() async {
         do {
             try await audioService.start()
             isListening = audioService.isListening
             audioError = nil
-            print("[ChatViewModel] Audio service started, listening: \(isListening)")
+
+            // Prevent device from sleeping while listening
+            if isListening {
+                UIApplication.shared.isIdleTimerDisabled = true
+                print("[ChatViewModel] Audio service started, listening: \(isListening), idle timer disabled")
+            }
         } catch {
             let errorMsg = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             audioError = errorMsg
@@ -122,7 +136,10 @@ class ChatViewModel: ObservableObject {
     func stopListening() {
         audioService.stop()
         isListening = false
-        print("[ChatViewModel] Audio service stopped")
+
+        // Re-enable idle timer when not listening
+        UIApplication.shared.isIdleTimerDisabled = false
+        print("[ChatViewModel] Audio service stopped, idle timer enabled")
     }
 
     // MARK: - Transmission State
@@ -139,9 +156,9 @@ class ChatViewModel: ObservableObject {
     /// Get a warning message if frequency is outside safe range
     func frequencyWarningMessage(for frequency: Int) -> String? {
         if frequency < Self.minSafeFrequency {
-            return "Frequency \(frequency) Hz is too low. Signal may be filtered by radio. Use \(Self.minSafeFrequency)+ Hz."
+            return String(localized: "Frequency \(frequency) Hz is too low. Signal may be filtered by radio. Use \(Self.minSafeFrequency)+ Hz.")
         } else if frequency > Self.maxSafeFrequency {
-            return "Frequency \(frequency) Hz exceeds USB passband. Use below \(Self.maxSafeFrequency) Hz."
+            return String(localized: "Frequency \(frequency) Hz exceeds USB passband. Use below \(Self.maxSafeFrequency) Hz.")
         }
         return nil
     }

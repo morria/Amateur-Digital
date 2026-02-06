@@ -91,9 +91,9 @@ struct ModeCard: View {
         case .rtty:
             // RTTY baud rate is configurable
             if settings.rttyBaudRate == 45.45 {
-                return "45.45 Baud"
+                return String(localized: "45.45 Baud")
             } else {
-                return "\(Int(settings.rttyBaudRate)) Baud"
+                return String(localized: "\(Int(settings.rttyBaudRate)) Baud")
             }
         default:
             return mode.subtitle

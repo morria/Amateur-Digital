@@ -1,0 +1,183 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "CFBundleDisplayName" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital"
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital"
+          }
+        }
+      }
+    },
+    "NSLocationWhenInUseUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital verwendet Ihren Standort, um automatisch Ihr Maidenhead-Locator-Feld und QTH für den Amateurfunkbetrieb zu bestimmen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital uses your location to automatically determine your Maidenhead grid square and QTH for amateur radio operation."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital usa tu ubicación para determinar automáticamente tu cuadrícula Maidenhead y QTH para la operación de radioaficionado."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital utilise votre position pour déterminer automatiquement votre carré Maidenhead et QTH pour l'exploitation radioamateur."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital usa la tua posizione per determinare automaticamente il tuo quadrato Maidenhead e QTH per l'attività radioamatoriale."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digitalはアマチュア無線運用のため、位置情報を使用してMaidenheadグリッドスクエアとQTHを自動的に決定します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital은 아마추어 무선 운용을 위해 위치 정보를 사용하여 Maidenhead 그리드 스퀘어와 QTH를 자동으로 결정합니다."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Amateur Digital usa sua localização para determinar automaticamente seu quadrado Maidenhead e QTH para operação de radioamador."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital使用您的位置自动确定您的Maidenhead网格定位和QTH，以便进行业余无线电操作。"
+          }
+        }
+      }
+    },
+    "NSMicrophoneUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital benötigt Mikrofonzugriff, um digitale Funksignale (RTTY, PSK31 usw.) von Ihrem Funkgerät über eine Audioschnittstelle zu empfangen und zu decodieren."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital needs microphone access to receive and decode digital radio signals (RTTY, PSK31, etc.) from your radio via an audio interface."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital necesita acceso al micrófono para recibir y decodificar señales de radio digitales (RTTY, PSK31, etc.) de tu radio a través de una interfaz de audio."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital a besoin de l'accès au microphone pour recevoir et décoder les signaux radio numériques (RTTY, PSK31, etc.) de votre radio via une interface audio."
+          }
+        },
+        "it" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital necessita dell'accesso al microfono per ricevere e decodificare i segnali radio digitali (RTTY, PSK31, ecc.) dalla tua radio tramite un'interfaccia audio."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digitalは、オーディオインターフェースを介して無線機からデジタル無線信号（RTTY、PSK31など）を受信・デコードするためにマイクへのアクセスが必要です。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital은 오디오 인터페이스를 통해 무선기에서 디지털 무선 신호(RTTY, PSK31 등)를 수신하고 디코딩하기 위해 마이크 접근 권한이 필요합니다."
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Amateur Digital precisa de acesso ao microfone para receber e decodificar sinais de rádio digitais (RTTY, PSK31, etc.) do seu rádio através de uma interface de áudio."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amateur Digital需要麦克风权限，以便通过音频接口从您的电台接收和解码数字无线电信号（RTTY、PSK31等）。"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}
