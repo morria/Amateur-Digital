@@ -29,7 +29,7 @@ struct ChannelRowView: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .lineLimit(1)
-                .truncationMode(.tail)
+                .truncationMode(.head)
         }
         .padding(.vertical, 4)
     }
