@@ -39,12 +39,13 @@ public protocol PSKDemodulatorDelegate: AnyObject {
 ///
 /// Demodulation approach:
 /// 1. Mix signal with local oscillator (I and Q channels)
-/// 2. Low-pass filter to extract baseband
-/// 3. Differential phase detection (compare current vs previous symbol)
+/// 2. IIR lowpass filter (bandwidth matched to symbol rate)
+/// 3. Sample filtered I/Q at symbol boundaries
+/// 4. Symbol timing recovery using early-late amplitude comparison
+/// 5. Differential phase detection (compare current vs previous symbol)
 ///    - BPSK: Dot product sign check for 180° detection
 ///    - QPSK: atan2 phase calculation, quantize to nearest quadrant
-/// 4. Symbol timing recovery using early-late gate
-/// 5. Varicode decoding to characters
+/// 6. Varicode decoding to characters
 ///
 /// Example usage:
 /// ```swift
@@ -63,7 +64,7 @@ public final class PSKDemodulator {
     /// I (in-phase) and Q (quadrature) local oscillator phase
     private var localPhase: Double = 0
 
-    /// Low-pass filter states for I and Q channels
+    /// IIR lowpass filtered I/Q (baseband signal)
     private var iFiltered: Double = 0
     private var qFiltered: Double = 0
 
@@ -72,12 +73,12 @@ public final class PSKDemodulator {
     private var prevQ: Double = 0
 
     /// Symbol timing recovery
-    private var symbolPhase: Double = 0
     private var symbolSamples: Int = 0
-    private var earlyAccumI: Double = 0
-    private var earlyAccumQ: Double = 0
-    private var lateAccumI: Double = 0
-    private var lateAccumQ: Double = 0
+    private var symbolTimingAdjust: Int = 0
+    private var earlyMag: Double = 0
+    private var lateMag: Double = 0
+
+    /// On-time I/Q accumulator (middle half of symbol for robust phase estimate)
     private var onTimeAccumI: Double = 0
     private var onTimeAccumQ: Double = 0
 
@@ -100,7 +101,7 @@ public final class PSKDemodulator {
     /// Current signal strength (0.0 to 1.0)
     public var signalStrength: Float {
         let snr = signalPower / max(noisePower, 0.001)
-        return Float(min(1.0, snr / 10.0))  // Normalize to 0-1
+        return Float(min(1.0, snr / 10.0))
     }
 
     /// Whether a valid PSK signal is currently detected
@@ -115,11 +116,11 @@ public final class PSKDemodulator {
 
     // MARK: - Constants
 
-    /// Low-pass filter coefficient (higher = more filtering, slower response)
-    private let filterAlpha: Double = 0.1
+    /// Symbol timing loop gain (controls how fast timing tracks)
+    private let timingGain: Double = 0.05
 
-    /// Symbol timing loop gain
-    private let timingGain: Double = 0.01
+    /// Maximum timing adjustment per symbol (fraction of symbol period)
+    private let maxTimingAdjustFraction: Double = 0.125
 
     // MARK: - Initialization
 
@@ -128,6 +129,13 @@ public final class PSKDemodulator {
     public init(configuration: PSKConfiguration = .standard) {
         self.configuration = configuration
         self.varicodeCodec = VaricodeCodec()
+    }
+
+    /// IIR filter coefficient, computed from baud rate and sample rate.
+    /// Bandwidth is ~3x the baud rate so the filter settles well within
+    /// one symbol period even after raised-cosine phase transitions.
+    private var filterAlpha: Double {
+        2.0 * .pi * (configuration.baudRate * 3.0) / configuration.sampleRate
     }
 
     // MARK: - Processing
@@ -146,7 +154,7 @@ public final class PSKDemodulator {
 
         // Mix with local oscillator (quadrature demodulation)
         let i = sampleD * cos(localPhase)
-        let q = sampleD * sin(localPhase)
+        let q = sampleD * -sin(localPhase)
 
         // Advance local oscillator phase
         localPhase += configuration.phaseIncrementPerSample
@@ -154,56 +162,54 @@ public final class PSKDemodulator {
             localPhase -= 2.0 * .pi
         }
 
-        // Low-pass filter (simple IIR)
-        iFiltered = iFiltered * (1.0 - filterAlpha) + i * filterAlpha
-        qFiltered = qFiltered * (1.0 - filterAlpha) + q * filterAlpha
+        // IIR lowpass filter — bandwidth matched to ~1.5× symbol rate
+        let alpha = filterAlpha
+        iFiltered += alpha * (i - iFiltered)
+        qFiltered += alpha * (q - qFiltered)
 
-        // Update signal power estimate
-        let instantPower = iFiltered * iFiltered + qFiltered * qFiltered
-        signalPower = signalPower * 0.99 + instantPower * 0.01
-
-        // Accumulate for symbol timing
         symbolSamples += 1
 
         let samplesPerSymbol = configuration.samplesPerSymbol
         let quarterSymbol = samplesPerSymbol / 4
-        let threeQuarterSymbol = (samplesPerSymbol * 3) / 4
 
-        // Early-late gate timing recovery
-        if symbolSamples < quarterSymbol {
-            earlyAccumI += iFiltered
-            earlyAccumQ += qFiltered
-        } else if symbolSamples >= quarterSymbol && symbolSamples < threeQuarterSymbol {
-            onTimeAccumI += iFiltered
-            onTimeAccumQ += qFiltered
-        } else {
-            lateAccumI += iFiltered
-            lateAccumQ += qFiltered
+        // Record filtered amplitude at 25% and 75% of symbol for timing recovery
+        if symbolSamples == quarterSymbol {
+            earlyMag = iFiltered * iFiltered + qFiltered * qFiltered
+        } else if symbolSamples == 3 * quarterSymbol {
+            lateMag = iFiltered * iFiltered + qFiltered * qFiltered
         }
 
-        // Check if we've completed a symbol
-        if symbolSamples >= samplesPerSymbol {
+        // Accumulate filtered I/Q over middle half of symbol for robust phase estimate
+        if symbolSamples >= quarterSymbol && symbolSamples < 3 * quarterSymbol {
+            onTimeAccumI += iFiltered
+            onTimeAccumQ += qFiltered
+        }
+
+        // Check if we've completed a symbol (with timing adjustment)
+        let targetLength = samplesPerSymbol + symbolTimingAdjust
+        if symbolSamples >= targetLength {
             processSymbol()
             symbolSamples = 0
-            earlyAccumI = 0
-            earlyAccumQ = 0
             onTimeAccumI = 0
             onTimeAccumQ = 0
-            lateAccumI = 0
-            lateAccumQ = 0
         }
     }
 
     /// Process a complete symbol
     private func processSymbol() {
-        // Symbol timing error (early-late gate)
-        let earlyMag = sqrt(earlyAccumI * earlyAccumI + earlyAccumQ * earlyAccumQ)
-        let lateMag = sqrt(lateAccumI * lateAccumI + lateAccumQ * lateAccumQ)
+        // Symbol timing recovery: compare amplitude at 25% vs 75% of symbol.
+        // For raised-cosine shaped PSK, amplitude is highest at mid-symbol.
+        // If we're sampling late, the late measurement catches a transition dip.
         let timingError = earlyMag - lateMag
+        let normalizedError = (earlyMag + lateMag) > 0
+            ? timingError / (earlyMag + lateMag)
+            : 0
 
-        // Adjust timing (not implemented for simplicity - would skip/add samples)
-        _ = timingError * timingGain
+        let maxAdjust = Int(maxTimingAdjustFraction * Double(configuration.samplesPerSymbol))
+        let rawAdjust = Int(normalizedError * timingGain * Double(configuration.samplesPerSymbol))
+        symbolTimingAdjust = max(-maxAdjust, min(maxAdjust, -rawAdjust))
 
+        // Use accumulated I/Q from middle half of symbol for robust phase estimate
         let currentI = onTimeAccumI
         let currentQ = onTimeAccumQ
 
@@ -318,9 +324,26 @@ public final class PSKDemodulator {
 
     /// Update signal detection state
     private func updateSignalDetection(symbolPower: Double) {
-        // Simple threshold-based detection
-        let threshold = 0.01  // Minimum power for signal detection
-        let newDetected = symbolPower > threshold && signalStrength > 0.1
+        // IIR filter output is already per-sample scale; no normalization needed
+
+        // Track signal power (fast attack, slow decay)
+        if symbolPower > signalPower {
+            signalPower = signalPower * 0.8 + symbolPower * 0.2
+        } else {
+            signalPower = signalPower * 0.95 + symbolPower * 0.05
+        }
+
+        // Track noise floor (slow adaptation, only updates when no signal)
+        if !_signalDetected {
+            noisePower = noisePower * 0.99 + symbolPower * 0.01
+        } else if symbolPower < noisePower {
+            noisePower = noisePower * 0.99 + symbolPower * 0.01
+        }
+
+        // SNR-based detection with hysteresis
+        let snr = noisePower > 0 ? signalPower / noisePower : 0
+        let detectThreshold: Double = _signalDetected ? 2.0 : 4.0  // Hysteresis
+        let newDetected = snr > detectThreshold
 
         if newDetected != _signalDetected {
             _signalDetected = newDetected
@@ -341,12 +364,10 @@ public final class PSKDemodulator {
         qFiltered = 0
         prevI = 0
         prevQ = 0
-        symbolPhase = 0
         symbolSamples = 0
-        earlyAccumI = 0
-        earlyAccumQ = 0
-        lateAccumI = 0
-        lateAccumQ = 0
+        symbolTimingAdjust = 0
+        earlyMag = 0
+        lateMag = 0
         onTimeAccumI = 0
         onTimeAccumQ = 0
         signalPower = 0
