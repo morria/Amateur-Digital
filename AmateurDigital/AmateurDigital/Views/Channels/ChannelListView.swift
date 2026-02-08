@@ -18,7 +18,7 @@ struct ChannelListView: View {
                 VStack(spacing: 16) {
                     if viewModel.isListening {
                         // Actively listening
-                        Image(systemName: viewModel.selectedMode.iconName)
+                        viewModel.selectedMode.iconImage
                             .font(.system(size: 48))
                             .foregroundColor(viewModel.selectedMode.color)
                         Text("Listening...")
@@ -51,7 +51,7 @@ struct ChannelListView: View {
                         .padding(.top, 8)
                     } else {
                         // Not listening yet
-                        Image(systemName: viewModel.selectedMode.iconName)
+                        viewModel.selectedMode.iconImage
                             .font(.system(size: 48))
                             .foregroundColor(viewModel.selectedMode.color.opacity(0.5))
                         Text("Starting...")
@@ -100,6 +100,7 @@ struct ChannelListView: View {
 struct ChannelSettingsSheet: View {
     let channelID: UUID
     @ObservedObject var viewModel: ChatViewModel
+    @ObservedObject private var settings = SettingsManager.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var squelch: Double = 0
@@ -115,6 +116,21 @@ struct ChannelSettingsSheet: View {
     /// Whether to show RTTY-specific settings
     private var isRTTY: Bool {
         viewModel.selectedMode == .rtty
+    }
+
+    /// Whether baud rate differs from global setting
+    private var baudRateOverridden: Bool {
+        baudRate != settings.rttyBaudRate
+    }
+
+    /// Whether polarity differs from global setting
+    private var polarityOverridden: Bool {
+        polarityInverted != settings.rttyPolarityInverted
+    }
+
+    /// Whether frequency offset differs from global setting
+    private var offsetOverridden: Bool {
+        Int(frequencyOffset) != settings.rttyFrequencyOffset
     }
 
     init(channel: Channel, viewModel: ChatViewModel) {
@@ -174,10 +190,25 @@ struct ChannelSettingsSheet: View {
                             .onChange(of: baudRate) { _, newValue in
                                 viewModel.setChannelBaudRate(newValue, for: channelID)
                             }
+
+                            if baudRateOverridden {
+                                Button("Reset to Global") {
+                                    baudRate = settings.rttyBaudRate
+                                    viewModel.setChannelBaudRate(settings.rttyBaudRate, for: channelID)
+                                }
+                                .font(.caption)
+                            }
                         } header: {
-                            Text("Baud Rate")
+                            HStack {
+                                Text("Baud Rate")
+                                if baudRateOverridden {
+                                    Text("overridden")
+                                        .font(.caption2)
+                                        .foregroundColor(.orange)
+                                }
+                            }
                         } footer: {
-                            Text("45.45 is standard amateur RTTY. 50 baud is common in Europe.")
+                            Text("45.45 is standard amateur RTTY. 50 baud is common in Europe. Global default: \(settings.rttyBaudRate == 45.45 ? "45.45" : "\(Int(settings.rttyBaudRate))") baud.")
                         }
 
                         Section {
@@ -185,8 +216,23 @@ struct ChannelSettingsSheet: View {
                                 .onChange(of: polarityInverted) { _, newValue in
                                     viewModel.setChannelPolarity(inverted: newValue, for: channelID)
                                 }
+
+                            if polarityOverridden {
+                                Button("Reset to Global") {
+                                    polarityInverted = settings.rttyPolarityInverted
+                                    viewModel.setChannelPolarity(inverted: settings.rttyPolarityInverted, for: channelID)
+                                }
+                                .font(.caption)
+                            }
                         } header: {
-                            Text("Polarity")
+                            HStack {
+                                Text("Polarity")
+                                if polarityOverridden {
+                                    Text("overridden")
+                                        .font(.caption2)
+                                        .foregroundColor(.orange)
+                                }
+                            }
                         } footer: {
                             Text("Swap mark and space tones. Try this if you see garbled text from a station.")
                         }
@@ -201,16 +247,23 @@ struct ChannelSettingsSheet: View {
                                         viewModel.setChannelFrequencyOffset(Int(newValue), for: channelID)
                                     }
                                 Button("Reset") {
-                                    frequencyOffset = 0
-                                    viewModel.setChannelFrequencyOffset(0, for: channelID)
+                                    frequencyOffset = Double(settings.rttyFrequencyOffset)
+                                    viewModel.setChannelFrequencyOffset(settings.rttyFrequencyOffset, for: channelID)
                                 }
                                 .buttonStyle(.borderless)
-                                .disabled(frequencyOffset == 0)
+                                .disabled(!offsetOverridden)
                             }
                         } header: {
-                            Text("Frequency Offset")
+                            HStack {
+                                Text("Frequency Offset")
+                                if offsetOverridden {
+                                    Text("overridden")
+                                        .font(.caption2)
+                                        .foregroundColor(.orange)
+                                }
+                            }
                         } footer: {
-                            Text("Fine-tune the receive frequency to improve decoding. AFC handles small drifts automatically.")
+                            Text("Fine-tune the receive frequency to improve decoding. Global default: \(settings.rttyFrequencyOffset) Hz.")
                         }
                     }
                 }

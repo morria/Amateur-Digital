@@ -38,6 +38,7 @@
 		A10000000000000000000032 /* ModeSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000032 /* ModeSidebarView.swift */; };
 		A10000000000000000000033 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000033 /* Localizable.xcstrings */; };
 		A10000000000000000000034 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000034 /* InfoPlist.xcstrings */; };
+		A10000000000000000000035 /* RattlegramCore in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000002 /* RattlegramCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -81,6 +82,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000022 /* AmateurDigitalCore in Frameworks */,
+				A10000000000000000000035 /* RattlegramCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -263,6 +265,7 @@
 			name = AmateurDigital;
 			packageProductDependencies = (
 				C10000000000000000000001 /* AmateurDigitalCore */,
+				C10000000000000000000002 /* RattlegramCore */,
 			);
 			productName = AmateurDigital;
 			productReference = A30000000000000000000001 /* AmateurDigital.app */;
@@ -302,6 +305,7 @@
 			mainGroup = A50000000000000000000001;
 			packageReferences = (
 				D10000000000000000000001 /* XCLocalSwiftPackageReference "AmateurDigitalCore" */,
+				D10000000000000000000002 /* XCLocalSwiftPackageReference "RattlegramCore" */,
 			);
 			productRefGroup = A50000000000000000000003 /* Products */;
 			projectDirPath = "";
@@ -578,12 +582,20 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = AmateurDigitalCore;
 		};
+		D10000000000000000000002 /* XCLocalSwiftPackageReference "RattlegramCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = RattlegramCore;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		C10000000000000000000001 /* AmateurDigitalCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AmateurDigitalCore;
+		};
+		C10000000000000000000002 /* RattlegramCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RattlegramCore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -102,12 +102,14 @@ class ChatViewModel: ObservableObject {
 
         // Watch for RTTY settings changes and reconfigure modem
         let settings = SettingsManager.shared
-        Publishers.Merge4(
-            settings.$rttyBaudRate.map { _ in () },
-            settings.$rttyMarkFreq.map { _ in () },
-            settings.$rttyShift.map { _ in () },
-            settings.$psk31CenterFreq.map { _ in () }
-        )
+        Publishers.MergeMany([
+            settings.$rttyBaudRate.map { _ in () }.eraseToAnyPublisher(),
+            settings.$rttyMarkFreq.map { _ in () }.eraseToAnyPublisher(),
+            settings.$rttyShift.map { _ in () }.eraseToAnyPublisher(),
+            settings.$psk31CenterFreq.map { _ in () }.eraseToAnyPublisher(),
+            settings.$rttyPolarityInverted.map { _ in () }.eraseToAnyPublisher(),
+            settings.$rttyFrequencyOffset.map { _ in () }.eraseToAnyPublisher(),
+        ])
         .dropFirst()  // Skip initial values
         .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
         .sink { [weak self] _ in
@@ -203,8 +205,17 @@ class ChatViewModel: ObservableObject {
         }
         frequencyWarning = nil
 
-        // RTTY is uppercase-only (Baudot limitation), PSK-31 preserves case
-        let messageContent = selectedMode == .rtty ? content.uppercased() : content
+        // RTTY is uppercase-only (Baudot limitation), PSK/Rattlegram preserve case
+        let messageContent: String
+        if selectedMode == .rtty {
+            messageContent = content.uppercased()
+        } else if selectedMode == .rattlegram {
+            // Rattlegram supports full UTF-8 but is limited to 170 bytes
+            let utf8 = Array(content.utf8.prefix(170))
+            messageContent = String(bytes: utf8, encoding: .utf8) ?? String(content.prefix(170))
+        } else {
+            messageContent = content
+        }
 
         let message = Message(
             content: messageContent,
@@ -309,7 +320,7 @@ class ChatViewModel: ObservableObject {
             initialSquelch = Int(settings.rttySquelch * 100)
         case .psk31, .bpsk63, .qpsk31, .qpsk63:
             initialSquelch = Int(settings.psk31Squelch * 100)
-        case .olivia:
+        case .olivia, .rattlegram:
             initialSquelch = 0
         }
 
@@ -457,12 +468,14 @@ class ChatViewModel: ObservableObject {
             initialSquelch = Int(settings.rttySquelch * 100)
         case .psk31, .bpsk63, .qpsk31, .qpsk63:
             initialSquelch = Int(settings.psk31Squelch * 100)
-        case .olivia:
+        case .olivia, .rattlegram:
             initialSquelch = 0
         }
 
-        // Get initial RTTY baud rate from global settings
+        // Get initial RTTY settings from global settings
         let initialBaudRate = mode == .rtty ? settings.rttyBaudRate : 45.45
+        let initialPolarity = mode == .rtty ? settings.rttyPolarityInverted : false
+        let initialOffset = mode == .rtty ? settings.rttyFrequencyOffset : 0
 
         // Create new channel with initial squelch and RTTY settings from global settings
         let newChannel = Channel(
@@ -471,7 +484,9 @@ class ChatViewModel: ObservableObject {
             messages: [],
             lastActivity: Date(),
             squelch: initialSquelch,
-            rttyBaudRate: initialBaudRate
+            rttyBaudRate: initialBaudRate,
+            polarityInverted: initialPolarity,
+            frequencyOffset: initialOffset
         )
         modeChannels.append(newChannel)
         channelsByMode[mode] = modeChannels
@@ -593,10 +608,68 @@ extension ChatViewModel: ModemServiceDelegate {
         }
     }
 
+    nonisolated func modemService(
+        _ service: ModemService,
+        didDecodeMessage text: String,
+        callSign: String?,
+        bitFlips: Int,
+        onChannel frequency: Double,
+        mode: DigitalMode
+    ) {
+        Task { @MainActor in
+            handleDecodedMessage(text, callSign: callSign, bitFlips: bitFlips, onChannel: frequency, mode: mode)
+        }
+    }
+
+    /// Handle a complete decoded message (burst modes like Rattlegram)
+    private func handleDecodedMessage(_ text: String, callSign: String?, bitFlips: Int, onChannel frequency: Double, mode: DigitalMode) {
+        let channelIndex = getOrCreateChannel(at: frequency, for: mode)
+        var modeChannels = channelsByMode[mode] ?? []
+        guard channelIndex < modeChannels.count else { return }
+
+        let now = Date()
+
+        // Update channel callsign if we got one
+        if let callSign = callSign, !callSign.isEmpty {
+            modeChannels[channelIndex].callsign = callSign
+        }
+
+        // Create a complete message (no buffering needed for burst modes)
+        let message = Message(
+            content: text,
+            direction: .received,
+            mode: mode,
+            callsign: callSign,
+            transmitState: nil
+        )
+        modeChannels[channelIndex].messages.append(message)
+        modeChannels[channelIndex].lastActivity = now
+        channelsByMode[mode] = modeChannels
+
+        // Update content tracking
+        var updatedLastReceivedContentTime = lastReceivedContentTimeByMode[mode] ?? [:]
+        updatedLastReceivedContentTime[frequency] = now
+        lastReceivedContentTimeByMode[mode] = updatedLastReceivedContentTime
+
+        print("[ChatViewModel] Rattlegram RX on \(Int(frequency)) Hz from \(callSign ?? "unknown"): \"\(text)\" (\(bitFlips) flips)")
+    }
+
+    /// Check if current input level is above the noise floor threshold
+    private var isAboveNoiseFloor: Bool {
+        let threshold = SettingsManager.shared.noiseFloorThreshold
+        guard threshold > -60 else { return true } // -60 = disabled
+        let level = Double(audioService.inputLevel)
+        let levelDb = 20 * log10(max(level, 0.001))
+        return levelDb >= threshold
+    }
+
     /// Handle decoded character on main actor
     /// The mode parameter specifies which decoder produced this character
     /// signalStrength is used for per-channel squelch filtering (0.0-1.0)
     private func handleDecodedCharacter(_ character: Character, onChannel frequency: Double, mode: DigitalMode, signalStrength: Float) {
+        // Check noise floor threshold
+        guard isAboveNoiseFloor else { return }
+
         let channelIndex = getOrCreateChannel(at: frequency, for: mode)
         let now = Date()
 

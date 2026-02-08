@@ -90,6 +90,13 @@ struct MessageBubbleView: View {
                     .background(bubbleColor)
                     .foregroundColor(textColor)
                     .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .contextMenu {
+                        Button {
+                            UIPasteboard.general.string = message.content
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                        }
+                    }
 
                 if isReceived && !revealedTimestamp {
                     Spacer(minLength: 60)

@@ -13,6 +13,7 @@ enum DigitalMode: String, CaseIterable, Identifiable {
     case qpsk31 = "QPSK31"
     case qpsk63 = "QPSK63"
     case olivia = "Olivia"
+    case rattlegram = "Rattlegram"
 
     var id: String { rawValue }
 
@@ -24,6 +25,7 @@ enum DigitalMode: String, CaseIterable, Identifiable {
         case .qpsk31: return "QPSK31"
         case .qpsk63: return "QPSK63"
         case .olivia: return "Olivia"
+        case .rattlegram: return "Rattlegram"
         }
     }
 
@@ -35,6 +37,7 @@ enum DigitalMode: String, CaseIterable, Identifiable {
         case .qpsk31: return "31.25 Baud"
         case .qpsk63: return "62.5 Baud"
         case .olivia: return "8/250"
+        case .rattlegram: return "OFDM 170B/1s"
         }
     }
 
@@ -52,6 +55,8 @@ enum DigitalMode: String, CaseIterable, Identifiable {
             return String(localized: "Fastest PSK variant at 4x throughput. Best signal required.")
         case .olivia:
             return String(localized: "Multi-tone MFSK with excellent weak signal performance.")
+        case .rattlegram:
+            return String(localized: "OFDM burst mode with polar codes. Sends up to 170 bytes in ~1 second.")
         }
     }
 
@@ -63,6 +68,7 @@ enum DigitalMode: String, CaseIterable, Identifiable {
         case .qpsk31: return 1000.0 // Same as PSK31
         case .qpsk63: return 1000.0 // Same as PSK31
         case .olivia: return 1500.0 // Olivia center frequency
+        case .rattlegram: return 1500.0 // OFDM carrier frequency
         }
     }
 
@@ -71,7 +77,7 @@ enum DigitalMode: String, CaseIterable, Identifiable {
         switch self {
         case .psk31, .bpsk63, .qpsk31, .qpsk63:
             return true
-        case .rtty, .olivia:
+        case .rtty, .olivia, .rattlegram:
             return false
         }
     }
@@ -85,6 +91,18 @@ enum DigitalMode: String, CaseIterable, Identifiable {
             return "waveform.path"
         case .olivia:
             return "waveform"
+        case .rattlegram:
+            return "bolt.horizontal"
+        }
+    }
+
+    /// Icon view — uses emoji for rattlegram, SF Symbol for others
+    @ViewBuilder
+    var iconImage: some View {
+        if self == .rattlegram {
+            Text("🐍")
+        } else {
+            Image(systemName: iconName)
         }
     }
 
@@ -103,6 +121,8 @@ enum DigitalMode: String, CaseIterable, Identifiable {
             return .indigo
         case .olivia:
             return .green
+        case .rattlegram:
+            return .teal
         }
     }
 }

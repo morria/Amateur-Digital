@@ -8,25 +8,44 @@
 import Foundation
 
 /// Configuration for which digital modes are enabled in the app.
-/// Disabled modes won't appear in the mode picker or settings.
+/// Core modes (RTTY, PSK31) are always enabled.
+/// Experimental modes can be toggled in Settings.
 enum ModeConfig {
-    /// Set of enabled digital modes
-    static let enabledModes: Set<DigitalMode> = [
+    /// Core modes that are always available
+    static let coreModes: Set<DigitalMode> = [
         .rtty,
         .psk31,
-        // .bpsk63,   // Not yet ready
-        // .qpsk31,   // Not yet ready
-        // .qpsk63,   // Not yet ready
-        // .olivia,   // Not yet implemented
+    ]
+
+    /// Experimental modes that can be toggled by the user
+    static let experimentalModes: Set<DigitalMode> = [
+        .bpsk63,
+        .qpsk31,
+        .qpsk63,
+        .rattlegram,
     ]
 
     /// Check if a specific mode is enabled
-    static func isEnabled(_ mode: DigitalMode) -> Bool {
-        enabledModes.contains(mode)
+    @MainActor static func isEnabled(_ mode: DigitalMode) -> Bool {
+        if coreModes.contains(mode) { return true }
+
+        let settings = SettingsManager.shared
+        switch mode {
+        case .bpsk63: return settings.enableBPSK63
+        case .qpsk31: return settings.enableQPSK31
+        case .qpsk63: return settings.enableQPSK63
+        case .rattlegram: return settings.enableRattlegram
+        default: return false
+        }
     }
 
     /// Get all enabled modes (preserves CaseIterable order)
-    static var allEnabledModes: [DigitalMode] {
-        DigitalMode.allCases.filter { enabledModes.contains($0) }
+    @MainActor static var allEnabledModes: [DigitalMode] {
+        DigitalMode.allCases.filter { isEnabled($0) }
+    }
+
+    /// Whether a mode is experimental
+    static func isExperimental(_ mode: DigitalMode) -> Bool {
+        experimentalModes.contains(mode)
     }
 }

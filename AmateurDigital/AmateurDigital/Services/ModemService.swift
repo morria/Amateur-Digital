@@ -13,6 +13,133 @@ import AVFoundation
 import AmateurDigitalCore
 #endif
 
+#if canImport(RattlegramCore)
+import RattlegramCore
+#endif
+
+import Accelerate
+
+// MARK: - Rattlegram Background Processor
+
+#if canImport(RattlegramCore)
+/// Processes Rattlegram audio on a dedicated background queue to avoid blocking the main thread.
+/// The OFDM decoder (SchmidlCox correlator, FFT, polar codes) is CPU-intensive and would
+/// freeze the UI if run on the main thread at 48kHz sample rate.
+final class RattlegramProcessor: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "com.amateurdigital.rattlegram", qos: .userInitiated)
+    private var decoder: RattlegramCore.Decoder
+    private var pendingCallSign: String?
+
+    /// Pre-allocated buffer for Float→Int16 conversion (avoids per-call allocation)
+    private var int16Buffer = [Int16]()
+    private var scaledBuffer = [Float]()
+
+    /// Called on main thread when a complete message is decoded
+    var onMessage: ((_ text: String, _ callSign: String?, _ bitFlips: Int) -> Void)?
+    /// Called on main thread when sync is detected or lost
+    var onSyncChanged: ((_ synced: Bool) -> Void)?
+
+    init(sampleRate: Int = 48000) {
+        self.decoder = RattlegramCore.Decoder(sampleRate: sampleRate)
+    }
+
+    /// Feed audio samples for decoding. Runs on background queue.
+    func feed(_ samples: [Float]) {
+        queue.async { [self] in
+            self.processOnQueue(samples)
+        }
+    }
+
+    /// Reset the decoder state. Synchronous to ensure clean state before next feed.
+    func reset() {
+        queue.sync { [self] in
+            self.decoder = RattlegramCore.Decoder(sampleRate: 48000)
+            self.pendingCallSign = nil
+        }
+    }
+
+    /// Whether a decoder instance exists
+    var isAvailable: Bool { true }
+
+    // MARK: - Private (runs on self.queue)
+
+    private func processOnQueue(_ samples: [Float]) {
+        let count = samples.count
+
+        // Resize pre-allocated buffers if needed
+        if int16Buffer.count < count {
+            int16Buffer = [Int16](repeating: 0, count: count)
+            scaledBuffer = [Float](repeating: 0, count: count)
+        }
+
+        // Float → Int16 using vDSP (much faster than per-element .map)
+        samples.withUnsafeBufferPointer { srcPtr in
+            scaledBuffer.withUnsafeMutableBufferPointer { scaledPtr in
+                var scale: Float = 32768.0
+                vDSP_vsmul(srcPtr.baseAddress!, 1, &scale, scaledPtr.baseAddress!, 1, vDSP_Length(count))
+            }
+            int16Buffer.withUnsafeMutableBufferPointer { dstPtr in
+                scaledBuffer.withUnsafeBufferPointer { scaledPtr in
+                    vDSP_vfix16(scaledPtr.baseAddress!, 1, dstPtr.baseAddress!, 1, vDSP_Length(count))
+                }
+            }
+        }
+
+        let ready = decoder.feed(Array(int16Buffer.prefix(count)), sampleCount: count)
+        guard ready else { return }
+
+        let status = decoder.process()
+        switch status {
+        case .sync:
+            let info = decoder.staged()
+            let cs = info.callSign.trimmingCharacters(in: .whitespaces)
+            pendingCallSign = cs.isEmpty ? nil : cs
+            print("[RattlegramProcessor] Sync from \(pendingCallSign ?? "unknown"), CFO: \(info.cfo) Hz, mode: \(info.mode)")
+            let onSync = self.onSyncChanged
+            DispatchQueue.main.async { onSync?(true) }
+
+        case .done:
+            var payload = [UInt8](repeating: 0, count: 170)
+            let flips = decoder.fetch(&payload)
+            if flips >= 0 {
+                let text = String(bytes: payload.prefix(while: { $0 != 0 }), encoding: .utf8) ?? ""
+                if !text.isEmpty {
+                    let callSign = pendingCallSign
+                    print("[RattlegramProcessor] Decoded: \"\(text)\" from \(callSign ?? "unknown"), \(flips) bit flips")
+                    let onMsg = self.onMessage
+                    let onSync = self.onSyncChanged
+                    DispatchQueue.main.async {
+                        onMsg?(text, callSign, flips)
+                        onSync?(false)
+                    }
+                }
+            }
+            pendingCallSign = nil
+
+        case .ping:
+            let info = decoder.staged()
+            let cs = info.callSign.trimmingCharacters(in: .whitespaces)
+            if !cs.isEmpty {
+                print("[RattlegramProcessor] Ping from \(cs)")
+                let onMsg = self.onMessage
+                let onSync = self.onSyncChanged
+                DispatchQueue.main.async {
+                    onMsg?("[PING]", cs, 0)
+                    onSync?(false)
+                }
+            }
+
+        case .fail, .nope:
+            let onSync = self.onSyncChanged
+            DispatchQueue.main.async { onSync?(false) }
+
+        default:
+            break
+        }
+    }
+}
+#endif
+
 /// Protocol for receiving decoded characters from ModemService
 protocol ModemServiceDelegate: AnyObject {
     /// Called when a character is decoded
@@ -34,6 +161,16 @@ protocol ModemServiceDelegate: AnyObject {
     func modemService(
         _ service: ModemService,
         signalDetected: Bool,
+        onChannel frequency: Double,
+        mode: DigitalMode
+    )
+
+    /// Called when a complete message is decoded (burst modes like Rattlegram)
+    func modemService(
+        _ service: ModemService,
+        didDecodeMessage text: String,
+        callSign: String?,
+        bitFlips: Int,
         onChannel frequency: Double,
         mode: DigitalMode
     )
@@ -78,16 +215,31 @@ class ModemService: ObservableObject {
     private var multiChannelPSKDemodulator: MultiChannelPSKDemodulator?
     #endif
 
+    // MARK: - Rattlegram Modem
+
+    #if canImport(RattlegramCore)
+    private var rattlegramProcessor: RattlegramProcessor?
+    #endif
+
     /// Audio format for processing (48kHz mono Float32)
     private let processingFormat: AVAudioFormat?
 
-    /// Whether DigiModesCore is available
+    /// Whether a modem is available for the active mode
     var isModemAvailable: Bool {
-        #if canImport(AmateurDigitalCore)
-        return rttyModem != nil
-        #else
-        return false
-        #endif
+        switch activeMode {
+        case .rattlegram:
+            #if canImport(RattlegramCore)
+            return rattlegramProcessor != nil
+            #else
+            return false
+            #endif
+        default:
+            #if canImport(AmateurDigitalCore)
+            return rttyModem != nil
+            #else
+            return false
+            #endif
+        }
     }
 
     #if canImport(AmateurDigitalCore)
@@ -144,7 +296,33 @@ class ModemService: ObservableObject {
         // Setup default channel frequencies for placeholder mode
         channelFrequencies = [1275, 1445, 1615, 1785, 1955, 2125, 2295, 2465]
         #endif
+
+        #if canImport(RattlegramCore)
+        self.rattlegramProcessor = RattlegramProcessor(sampleRate: 48000)
+        setupRattlegramCallbacks()
+        #endif
     }
+
+    #if canImport(RattlegramCore)
+    /// Wire up Rattlegram processor callbacks to delegate
+    private func setupRattlegramCallbacks() {
+        rattlegramProcessor?.onMessage = { [weak self] text, callSign, bitFlips in
+            guard let self = self else { return }
+            self.delegate?.modemService(
+                self,
+                didDecodeMessage: text,
+                callSign: callSign,
+                bitFlips: bitFlips,
+                onChannel: 1500.0,
+                mode: .rattlegram
+            )
+        }
+        rattlegramProcessor?.onSyncChanged = { [weak self] synced in
+            guard let self = self else { return }
+            self.isDecoding = synced
+        }
+    }
+    #endif
 
     /// Reconfigure modem with current settings (call when settings change)
     func reconfigureModem() {
@@ -160,6 +338,18 @@ class ModemService: ObservableObject {
         )
         multiChannelDemodulator?.delegate = self
         multiChannelDemodulator?.setSquelch(Float(settings.rttySquelch))
+
+        // Apply global polarity and offset to all RTTY channels
+        if settings.rttyPolarityInverted || settings.rttyFrequencyOffset != 0 {
+            for channel in multiChannelDemodulator?.channels ?? [] {
+                if settings.rttyPolarityInverted {
+                    multiChannelDemodulator?.setPolarity(inverted: true, forChannel: channel.id)
+                }
+                if settings.rttyFrequencyOffset != 0 {
+                    multiChannelDemodulator?.setFrequencyOffset(Double(settings.rttyFrequencyOffset), forChannel: channel.id)
+                }
+            }
+        }
 
         // Rebuild PSK modem and multi-channel demodulator with new config
         pskModem = PSKModem(configuration: currentPSKConfiguration)
@@ -178,6 +368,8 @@ class ModemService: ObservableObject {
             channelFrequencies = multiChannelPSKDemodulator?.channels.map { $0.frequency } ?? []
         case .olivia:
             break
+        case .rattlegram:
+            channelFrequencies = [1500.0]
         }
         #endif
     }
@@ -240,6 +432,12 @@ class ModemService: ObservableObject {
         case .olivia:
             // Not yet implemented
             channelFrequencies = []
+
+        case .rattlegram:
+            #if canImport(RattlegramCore)
+            rattlegramProcessor?.reset()
+            #endif
+            channelFrequencies = [1500.0]
         }
         #endif
     }
@@ -254,6 +452,10 @@ class ModemService: ObservableObject {
         // Reset PSK modems - setting to nil releases resources
         pskModem?.reset()
         multiChannelPSKDemodulator?.reset()
+        #endif
+
+        #if canImport(RattlegramCore)
+        rattlegramProcessor?.reset()
         #endif
 
         signalStrength = 0
@@ -306,6 +508,16 @@ class ModemService: ObservableObject {
         case .olivia:
             // Not yet implemented
             break
+
+        case .rattlegram:
+            break  // Handled below with separate canImport
+        }
+        #endif
+
+        #if canImport(RattlegramCore)
+        if activeMode == .rattlegram {
+            // Feed to background processor — heavy DSP work runs off main thread
+            rattlegramProcessor?.feed(samples)
         }
         #endif
     }
@@ -320,9 +532,17 @@ class ModemService: ObservableObject {
     /// - Parameter text: Text to encode
     /// - Returns: Audio buffer, or nil if encoding fails
     func encodeTxText(_ text: String) -> AVAudioPCMBuffer? {
-        #if canImport(AmateurDigitalCore)
         var samples: [Float] = []
 
+        #if canImport(RattlegramCore)
+        if activeMode == .rattlegram {
+            samples = encodeRattlegramSamples(text, atFrequency: nil)
+            if samples.isEmpty { return nil }
+            return createBuffer(from: samples)
+        }
+        #endif
+
+        #if canImport(AmateurDigitalCore)
         switch activeMode {
         case .rtty:
             guard let modem = rttyModem else { return nil }
@@ -340,8 +560,7 @@ class ModemService: ObservableObject {
                 postambleMs: 50
             )
 
-        case .olivia:
-            // Not yet implemented
+        case .olivia, .rattlegram:
             return nil
         }
 
@@ -362,6 +581,12 @@ class ModemService: ObservableObject {
     ///   - frequency: Channel frequency in Hz, or nil to use default
     /// - Returns: Audio samples
     func encodeTxSamples(_ text: String, atFrequency frequency: Double?) -> [Float] {
+        #if canImport(RattlegramCore)
+        if activeMode == .rattlegram {
+            return encodeRattlegramSamples(text, atFrequency: frequency)
+        }
+        #endif
+
         #if canImport(AmateurDigitalCore)
         switch activeMode {
         case .rtty:
@@ -395,7 +620,7 @@ class ModemService: ObservableObject {
                 postambleMs: 50
             )
 
-        case .olivia:
+        case .olivia, .rattlegram:
             return []
         }
         #else
@@ -417,7 +642,7 @@ class ModemService: ObservableObject {
             guard let modem = pskModem else { return nil }
             samples = modem.generateIdle(duration: duration)
 
-        case .olivia:
+        case .olivia, .rattlegram:
             return nil
         }
 
@@ -470,8 +695,8 @@ class ModemService: ObservableObject {
             // Generate idle carrier for PSK phase lock
             return txModem.generateIdle(duration: durationSeconds)
 
-        case .olivia:
-            // Not yet implemented
+        case .olivia, .rattlegram:
+            // Rattlegram has built-in sync, no preamble needed
             return nil
         }
         #else
@@ -573,6 +798,41 @@ class ModemService: ObservableObject {
 
         return buffer
     }
+
+    // MARK: - Rattlegram Processing
+
+    #if canImport(RattlegramCore)
+    /// Encode text for Rattlegram transmission
+    private func encodeRattlegramSamples(_ text: String, atFrequency frequency: Double?) -> [Float] {
+        let encoder = RattlegramCore.Encoder(sampleRate: 48000)
+
+        // Build 170-byte null-padded payload
+        var payload = [UInt8](repeating: 0, count: 170)
+        let bytes = Array(text.utf8)
+        for i in 0..<min(bytes.count, 170) {
+            payload[i] = bytes[i]
+        }
+
+        let carrierFreq = Int(frequency ?? 1500.0)
+        let callSign = settings.callsign
+
+        encoder.configure(
+            payload: payload,
+            callSign: callSign,
+            carrierFrequency: carrierFreq
+        )
+
+        var allSamples = [Float]()
+        var buf = [Int16](repeating: 0, count: encoder.extendedLength)
+        while encoder.produce(&buf) {
+            allSamples.append(contentsOf: buf.map { Float($0) / 32768.0 })
+        }
+        // Final (silence) symbol
+        allSamples.append(contentsOf: buf.map { Float($0) / 32768.0 })
+
+        return allSamples
+    }
+    #endif
 }
 
 // MARK: - MultiChannelRTTYDemodulatorDelegate

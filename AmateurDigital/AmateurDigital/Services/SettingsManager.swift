@@ -143,6 +143,39 @@ class SettingsManager: NSObject, ObservableObject {
         didSet { save(txPreambleMs, forKey: "txPreambleMs") }
     }
 
+    // Experimental Mode Toggles
+    @Published var enableBPSK63: Bool {
+        didSet { save(enableBPSK63, forKey: "enableBPSK63") }
+    }
+
+    @Published var enableQPSK31: Bool {
+        didSet { save(enableQPSK31, forKey: "enableQPSK31") }
+    }
+
+    @Published var enableQPSK63: Bool {
+        didSet { save(enableQPSK63, forKey: "enableQPSK63") }
+    }
+
+    @Published var enableRattlegram: Bool {
+        didSet { save(enableRattlegram, forKey: "enableRattlegram") }
+    }
+
+    // RTTY Global Settings (per-channel defaults)
+    @Published var rttyPolarityInverted: Bool {
+        didSet { save(rttyPolarityInverted, forKey: "rttyPolarityInverted") }
+    }
+
+    @Published var rttyFrequencyOffset: Int {
+        didSet { save(rttyFrequencyOffset, forKey: "rttyFrequencyOffset") }
+    }
+
+    // Noise Floor / Decode Threshold
+    /// Minimum signal level (dB) below which decoding is suppressed.
+    /// -60 = off (decode everything), -20 = only strong signals
+    @Published var noiseFloorThreshold: Double {
+        didSet { save(noiseFloorThreshold, forKey: "noiseFloorThreshold") }
+    }
+
     // MARK: - Location
 
     enum LocationStatus: Equatable {
@@ -186,6 +219,16 @@ class SettingsManager: NSObject, ObservableObject {
         self.psk31Squelch = Self.initialLoadDouble(forKey: "psk31Squelch", default: 0.3)
         self.outputGain = Self.initialLoadDouble(forKey: "outputGain", default: 1.0)
         self.txPreambleMs = Self.initialLoadInt(forKey: "txPreambleMs", default: 200)
+
+        self.enableBPSK63 = Self.initialLoadBool(forKey: "enableBPSK63", default: false)
+        self.enableQPSK31 = Self.initialLoadBool(forKey: "enableQPSK31", default: false)
+        self.enableQPSK63 = Self.initialLoadBool(forKey: "enableQPSK63", default: false)
+        self.enableRattlegram = Self.initialLoadBool(forKey: "enableRattlegram", default: false)
+
+        self.rttyPolarityInverted = Self.initialLoadBool(forKey: "rttyPolarityInverted", default: false)
+        self.rttyFrequencyOffset = Self.initialLoadInt(forKey: "rttyFrequencyOffset", default: 0)
+
+        self.noiseFloorThreshold = Self.initialLoadDouble(forKey: "noiseFloorThreshold", default: -60.0)
 
         super.init()
 
@@ -260,6 +303,13 @@ class SettingsManager: NSObject, ObservableObject {
             self.psk31Squelch = loadDouble(forKey: "psk31Squelch", default: 0.3)
             self.outputGain = loadDouble(forKey: "outputGain", default: 1.0)
             self.txPreambleMs = loadInt(forKey: "txPreambleMs", default: 200)
+            self.enableBPSK63 = loadBool(forKey: "enableBPSK63", default: false)
+            self.enableQPSK31 = loadBool(forKey: "enableQPSK31", default: false)
+            self.enableQPSK63 = loadBool(forKey: "enableQPSK63", default: false)
+            self.enableRattlegram = loadBool(forKey: "enableRattlegram", default: false)
+            self.rttyPolarityInverted = loadBool(forKey: "rttyPolarityInverted", default: false)
+            self.rttyFrequencyOffset = loadInt(forKey: "rttyFrequencyOffset", default: 0)
+            self.noiseFloorThreshold = loadDouble(forKey: "noiseFloorThreshold", default: -60.0)
         }
     }
 

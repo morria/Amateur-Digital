@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ModeSelectionView: View {
     @EnvironmentObject var viewModel: ChatViewModel
+    @ObservedObject private var settings = SettingsManager.shared
     @State private var navigationPath = NavigationPath()
     @State private var showingSettings = false
 
@@ -110,14 +111,23 @@ struct ModeCard: View {
                             .fill(mode.color.opacity(0.15))
                             .frame(width: 50, height: 50)
 
-                        Image(systemName: mode.iconName)
+                        mode.iconImage
                             .font(.system(size: 22))
                             .foregroundColor(mode.color)
                     }
 
                     Spacer()
 
-                    if mode.isPSKMode {
+                    if ModeConfig.isExperimental(mode) {
+                        Text("BETA")
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.orange.opacity(0.15))
+                            .foregroundColor(.orange)
+                            .clipShape(Capsule())
+                    } else if mode.isPSKMode {
                         Text("PSK")
                             .font(.caption2)
                             .fontWeight(.semibold)

@@ -99,7 +99,7 @@ struct iPadChannelListView: View {
             if visibleChannels.isEmpty {
                 VStack(spacing: 16) {
                     if viewModel.isListening {
-                        Image(systemName: viewModel.selectedMode.iconName)
+                        viewModel.selectedMode.iconImage
                             .font(.system(size: 48))
                             .foregroundColor(viewModel.selectedMode.color)
                         Text("Listening...")
@@ -130,7 +130,7 @@ struct iPadChannelListView: View {
                         .buttonStyle(.borderedProminent)
                         .padding(.top, 8)
                     } else {
-                        Image(systemName: viewModel.selectedMode.iconName)
+                        viewModel.selectedMode.iconImage
                             .font(.system(size: 48))
                             .foregroundColor(viewModel.selectedMode.color.opacity(0.5))
                         Text("Starting...")

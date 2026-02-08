@@ -9,6 +9,7 @@ import SwiftUI
 
 struct PhoneNavigationView: View {
     @EnvironmentObject var viewModel: ChatViewModel
+    @ObservedObject private var settings = SettingsManager.shared
     @State private var navigationPath = NavigationPath()
     @State private var showingSettings = false
 

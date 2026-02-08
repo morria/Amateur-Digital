@@ -59,23 +59,31 @@ struct Channel: Identifiable, Equatable, Hashable {
     }
 
     /// Preview text for channel list
-    /// Shows the tail of real-time decoding buffer or last message
+    /// Shows the latest decoded content combining last message and real-time buffer
     var previewText: String {
-        let raw: String
-        if !decodingBuffer.isEmpty {
-            raw = decodingBuffer
-        } else if let lastContent = messages.last?.content {
-            raw = lastContent
-        } else {
-            return ""
+        // Combine last message content with current decoding buffer
+        var parts: [String] = []
+
+        if let lastContent = messages.last?.content {
+            let trimmed = lastContent.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                parts.append(trimmed)
+            }
         }
 
-        // Return a generous tail of the content (last 300 chars)
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.count > 300 {
-            return String(trimmed.suffix(300))
+        let bufferTrimmed = decodingBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !bufferTrimmed.isEmpty {
+            parts.append(bufferTrimmed)
         }
-        return trimmed
+
+        guard !parts.isEmpty else { return "" }
+
+        let combined = parts.joined(separator: " ")
+        // Return a generous tail (last 300 chars) for up to 2 lines of display
+        if combined.count > 300 {
+            return String(combined.suffix(300))
+        }
+        return combined
     }
 
     /// Time since last activity

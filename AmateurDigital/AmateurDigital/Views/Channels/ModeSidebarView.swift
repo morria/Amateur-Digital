@@ -46,7 +46,7 @@ struct ModeRowView: View {
                     .fill(mode.color.opacity(0.15))
                     .frame(width: 36, height: 36)
 
-                Image(systemName: mode.iconName)
+                mode.iconImage
                     .font(.system(size: 16))
                     .foregroundColor(mode.color)
             }

@@ -39,9 +39,16 @@ struct ChannelDetailView: View {
             } else {
                 return "RTTY \(Int(settings.rttyBaudRate))"
             }
+        case .rattlegram:
+            return "Rattlegram"
         default:
             return viewModel.selectedMode.rawValue.uppercased()
         }
+    }
+
+    /// Remaining bytes for Rattlegram mode (170 byte limit)
+    private var rattlegramBytesRemaining: Int {
+        170 - messageText.utf8.count
     }
 
     /// CQ calling message placeholder based on user's callsign, grid, and mode
@@ -74,6 +81,13 @@ struct ChannelDetailView: View {
                 return "cq cq de \(lowerCall) \(lowerCall) k"
             }
             return "cq cq de \(lowerCall) \(lowerCall) \(lowerGrid) k"
+
+        case .rattlegram:
+            // Rattlegram supports full UTF-8, use mixed case
+            if grid.isEmpty {
+                return "CQ CQ DE \(call) \(call) K"
+            }
+            return "CQ CQ DE \(call) \(call) \(grid) K"
         }
     }
 
@@ -100,7 +114,7 @@ struct ChannelDetailView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                     }
-                    .gesture(
+                    .simultaneousGesture(
                         DragGesture()
                             .onChanged { value in
                                 if value.translation.width < 0 {
@@ -159,6 +173,18 @@ struct ChannelDetailView: View {
                         .background(Color.orange.opacity(0.1))
                     }
 
+                    // Byte counter for Rattlegram mode
+                    if viewModel.selectedMode == .rattlegram && !messageText.isEmpty {
+                        HStack {
+                            Spacer()
+                            Text("\(messageText.utf8.count)/170")
+                                .font(.caption2)
+                                .foregroundColor(rattlegramBytesRemaining < 0 ? .red : .secondary)
+                                .padding(.trailing, 16)
+                        }
+                        .padding(.top, 4)
+                    }
+
                     HStack(spacing: 12) {
                         TextField(cqPlaceholder, text: $messageText, axis: .vertical)
                             .textFieldStyle(.plain)
@@ -186,7 +212,7 @@ struct ChannelDetailView: View {
                                 .font(.system(size: 32))
                                 .foregroundColor(viewModel.isTransmitting ? .red : (isFrequencySafe ? .blue : .gray))
                         }
-                        .disabled(!isFrequencySafe || (viewModel.isTransmitting == false && messageText.isEmpty && cqPlaceholder.isEmpty))
+                        .disabled(!isFrequencySafe || (viewModel.isTransmitting == false && messageText.isEmpty && cqPlaceholder.isEmpty) || (viewModel.selectedMode == .rattlegram && rattlegramBytesRemaining < 0))
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)

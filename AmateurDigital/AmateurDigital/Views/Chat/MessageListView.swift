@@ -31,7 +31,7 @@ struct MessageListView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
             }
-            .gesture(
+            .simultaneousGesture(
                 DragGesture()
                     .onChanged { value in
                         // Only allow dragging left (negative x)

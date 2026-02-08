@@ -36,3 +36,4 @@ fastlane/test_output
 # IDE
 .idea/
 *.iml
+.reference

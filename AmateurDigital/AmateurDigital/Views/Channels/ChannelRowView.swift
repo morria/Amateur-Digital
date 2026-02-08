@@ -24,12 +24,15 @@ struct ChannelRowView: View {
                     .foregroundColor(.secondary)
             }
 
-            // Preview text (most recent 2 lines)
-            Text(channel.previewText)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .lineLimit(2)
-                .truncationMode(.tail)
+            // Preview text (latest tail of decoded text, up to 2 lines)
+            if !channel.previewText.isEmpty {
+                Text(channel.previewText)
+                    .font(.system(.subheadline, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.head)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(.vertical, 4)
     }

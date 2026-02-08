@@ -5,6 +5,33 @@
 
 import SwiftUI
 
+// MARK: - Squelch Level Presets
+
+enum SquelchLevel: Double, CaseIterable, Identifiable {
+    case off = 0.0
+    case low = 0.05
+    case medium = 0.15
+    case high = 0.35
+    case max = 0.60
+
+    var id: Double { rawValue }
+
+    var label: String {
+        switch self {
+        case .off: return "Off"
+        case .low: return "Low"
+        case .medium: return "Medium"
+        case .high: return "High"
+        case .max: return "Max"
+        }
+    }
+
+    /// Find the closest preset for a given value
+    static func closest(to value: Double) -> SquelchLevel {
+        allCases.min(by: { abs($0.rawValue - value) < abs($1.rawValue - value) }) ?? .off
+    }
+}
+
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var settings = SettingsManager.shared
@@ -167,6 +194,35 @@ struct SettingsView: View {
                         }
                     }
 
+                    Section {
+                        Toggle(isOn: $settings.enableBPSK63) {
+                            Label("BPSK63", systemImage: "waveform.path")
+                        }
+                        Toggle(isOn: $settings.enableQPSK31) {
+                            Label("QPSK31", systemImage: "waveform.path")
+                        }
+                        Toggle(isOn: $settings.enableQPSK63) {
+                            Label("QPSK63", systemImage: "waveform.path")
+                        }
+                        Toggle(isOn: $settings.enableRattlegram) {
+                            Label("Rattlegram", systemImage: "bolt.horizontal")
+                        }
+                    } header: {
+                        HStack {
+                            Text("Experimental Modes")
+                            Text("BETA")
+                                .font(.caption2)
+                                .fontWeight(.bold)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.orange)
+                                .foregroundColor(.white)
+                                .cornerRadius(4)
+                        }
+                    } footer: {
+                        Text("These decoders are under development. Decode quality may be poor and transmissions may not be standards-compliant. Enable at your own risk.")
+                    }
+
                     Section("Reference") {
                         NavigationLink {
                             FrequencyReferenceView(filterMode: nil)
@@ -193,7 +249,7 @@ struct SettingsView: View {
                         HStack {
                             Text("Version")
                             Spacer()
-                            Text("1.0.0")
+                            Text("1.0.1")
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -247,10 +303,40 @@ struct SettingsView: View {
         }
 
         Section {
+            Toggle("Invert Polarity", isOn: $settings.rttyPolarityInverted)
+
             VStack(alignment: .leading) {
-                Text("Squelch: \(Int(settings.rttySquelch * 100))%")
-                Slider(value: $settings.rttySquelch, in: 0...1)
+                HStack {
+                    Text("Frequency Offset")
+                    Spacer()
+                    Text("\(settings.rttyFrequencyOffset) Hz")
+                        .foregroundColor(.secondary)
+                }
+                Slider(
+                    value: Binding(
+                        get: { Double(settings.rttyFrequencyOffset) },
+                        set: { settings.rttyFrequencyOffset = Int($0) }
+                    ),
+                    in: -50...50,
+                    step: 1
+                )
             }
+        } header: {
+            Text("Decoder")
+        } footer: {
+            Text("These are global defaults. Individual channels can override these in the channel settings.")
+        }
+
+        Section {
+            Picker("Squelch", selection: Binding(
+                get: { SquelchLevel.closest(to: settings.rttySquelch) },
+                set: { settings.rttySquelch = $0.rawValue }
+            )) {
+                ForEach(SquelchLevel.allCases) { level in
+                    Text(level.label).tag(level)
+                }
+            }
+            .pickerStyle(.segmented)
         } header: {
             Text("Squelch")
         } footer: {
@@ -290,15 +376,15 @@ struct SettingsView: View {
         }
 
         Section {
-            VStack(alignment: .leading) {
-                HStack {
-                    Text("Squelch")
-                    Spacer()
-                    Text("\(Int(settings.psk31Squelch * 100))%")
-                        .foregroundColor(.secondary)
+            Picker("Squelch", selection: Binding(
+                get: { SquelchLevel.closest(to: settings.psk31Squelch) },
+                set: { settings.psk31Squelch = $0.rawValue }
+            )) {
+                ForEach(SquelchLevel.allCases) { level in
+                    Text(level.label).tag(level)
                 }
-                Slider(value: $settings.psk31Squelch, in: 0...1)
             }
+            .pickerStyle(.segmented)
         } header: {
             Text("Squelch")
         } footer: {
@@ -364,31 +450,46 @@ struct SettingsView: View {
 
 struct AudioMeterView: View {
     @StateObject private var audioMeter = AudioMeterModel()
+    @ObservedObject private var settings = SettingsManager.shared
 
     var body: some View {
         VStack(spacing: 24) {
             Text("Input Level")
                 .font(.headline)
 
-            // Level meter bar
+            // Level meter bar with noise floor indicator
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     // Background
                     RoundedRectangle(cornerRadius: 4)
                         .fill(Color(.systemGray5))
 
-                    // Level indicator
+                    // Level indicator (dB-scaled so changes are visible)
                     RoundedRectangle(cornerRadius: 4)
                         .fill(meterColor)
-                        .frame(width: geometry.size.width * audioMeter.displayLevel)
-                        .animation(.easeOut(duration: 0.15), value: audioMeter.displayLevel)
+                        .frame(width: geometry.size.width * dbToPosition(audioMeter.displayDecibels))
+                        .animation(.easeOut(duration: 0.15), value: audioMeter.displayDecibels)
+
+                    // Noise floor threshold marker
+                    if settings.noiseFloorThreshold > -60 {
+                        let thresholdPosition = dbToPosition(settings.noiseFloorThreshold)
+                        Rectangle()
+                            .fill(Color.orange)
+                            .frame(width: 2)
+                            .offset(x: geometry.size.width * thresholdPosition - 1)
+
+                        // Threshold zone (below threshold = suppressed)
+                        Rectangle()
+                            .fill(Color.orange.opacity(0.1))
+                            .frame(width: geometry.size.width * thresholdPosition)
+                    }
 
                     // Peak indicator
-                    if audioMeter.peakLevel > 0.01 {
+                    if audioMeter.peakDecibels > -55 {
                         Rectangle()
                             .fill(Color.white)
                             .frame(width: 2)
-                            .offset(x: geometry.size.width * audioMeter.peakLevel - 1)
+                            .offset(x: geometry.size.width * dbToPosition(audioMeter.peakDecibels) - 1)
                     }
                 }
             }
@@ -416,16 +517,56 @@ struct AudioMeterView: View {
                 .font(.system(.title, design: .monospaced))
                 .foregroundColor(audioMeter.displayDecibels > -6 ? .red : .primary)
 
-            Spacer()
+            // Noise floor section
+            VStack(spacing: 12) {
+                Divider()
 
-            // Instructions
-            VStack(spacing: 8) {
-                Text("Adjust your radio's audio output")
-                    .font(.subheadline)
-                Text("Aim for peaks around -12 to -6 dB")
+                Text("Noise Floor Threshold")
+                    .font(.headline)
+
+                HStack {
+                    Text("Current noise:")
+                        .foregroundColor(.secondary)
+                    Text(String(format: "%.1f dB", audioMeter.displayDecibels))
+                        .font(.system(.body, design: .monospaced))
+                }
+
+                HStack {
+                    Text("Threshold:")
+                        .foregroundColor(.secondary)
+                    Text(settings.noiseFloorThreshold <= -59 ? "Off" : String(format: "%.0f dB", settings.noiseFloorThreshold))
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundColor(.orange)
+                }
+
+                // Set noise floor button - captures current level + small margin
+                Button {
+                    let margin = 3.0 // 3 dB above current noise
+                    settings.noiseFloorThreshold = min(audioMeter.displayDecibels + margin, -3)
+                } label: {
+                    Label("Set Threshold to Current Level", systemImage: "hand.tap")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.orange)
+
+                if settings.noiseFloorThreshold > -60 {
+                    Button {
+                        settings.noiseFloorThreshold = -60
+                    } label: {
+                        Label("Disable Threshold", systemImage: "xmark.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.secondary)
+                }
+
+                Text("With no signal on the radio, tap \"Set Threshold\" to capture the noise floor. Signals below this level will be ignored by decoders.")
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
             }
+            .padding(.horizontal)
 
             Spacer()
         }
@@ -448,6 +589,11 @@ struct AudioMeterView: View {
             return .green
         }
     }
+
+    /// Convert dB value to 0.0-1.0 position (maps -60 to 0 dB)
+    private func dbToPosition(_ db: Double) -> CGFloat {
+        CGFloat(max(0, min(1, (db + 60) / 60)))
+    }
 }
 
 // MARK: - Audio Meter Model
@@ -462,6 +608,7 @@ class AudioMeterModel: ObservableObject {
     @Published var displayLevel: CGFloat = 0
     @Published var displayDecibels: Double = -60
     @Published var peakLevel: CGFloat = 0
+    @Published var peakDecibels: Double = -60
 
     private var isMonitoring = false
     private var sampleTask: Task<Void, Never>?
@@ -499,6 +646,9 @@ class AudioMeterModel: ObservableObject {
                 if rawLevel > peakLevel {
                     peakLevel = rawLevel
                 }
+                if rawDecibels > peakDecibels {
+                    peakDecibels = rawDecibels
+                }
 
                 try? await Task.sleep(for: .milliseconds(30))
             }
@@ -513,6 +663,7 @@ class AudioMeterModel: ObservableObject {
 
                 // Decay peak slowly
                 peakLevel = max(0, peakLevel - 0.008)
+                peakDecibels = max(-60, peakDecibels - 0.5)
 
                 try? await Task.sleep(for: .milliseconds(100))
             }
@@ -568,10 +719,40 @@ struct RTTYSettingsView: View {
             }
 
             Section {
+                Toggle("Invert Polarity", isOn: $settings.rttyPolarityInverted)
+
                 VStack(alignment: .leading) {
-                    Text("Squelch: \(Int(settings.rttySquelch * 100))%")
-                    Slider(value: $settings.rttySquelch, in: 0...1)
+                    HStack {
+                        Text("Frequency Offset")
+                        Spacer()
+                        Text("\(settings.rttyFrequencyOffset) Hz")
+                            .foregroundColor(.secondary)
+                    }
+                    Slider(
+                        value: Binding(
+                            get: { Double(settings.rttyFrequencyOffset) },
+                            set: { settings.rttyFrequencyOffset = Int($0) }
+                        ),
+                        in: -50...50,
+                        step: 1
+                    )
                 }
+            } header: {
+                Text("Decoder")
+            } footer: {
+                Text("These are global defaults. Individual channels can override these in the channel settings.")
+            }
+
+            Section {
+                Picker("Squelch", selection: Binding(
+                    get: { SquelchLevel.closest(to: settings.rttySquelch) },
+                    set: { settings.rttySquelch = $0.rawValue }
+                )) {
+                    ForEach(SquelchLevel.allCases) { level in
+                        Text(level.label).tag(level)
+                    }
+                }
+                .pickerStyle(.segmented)
             } header: {
                 Text("Squelch")
             } footer: {
@@ -606,15 +787,15 @@ struct PSK31SettingsView: View {
             }
 
             Section {
-                VStack(alignment: .leading) {
-                    HStack {
-                        Text("Squelch")
-                        Spacer()
-                        Text("\(Int(settings.psk31Squelch * 100))%")
-                            .foregroundColor(.secondary)
+                Picker("Squelch", selection: Binding(
+                    get: { SquelchLevel.closest(to: settings.psk31Squelch) },
+                    set: { settings.psk31Squelch = $0.rawValue }
+                )) {
+                    ForEach(SquelchLevel.allCases) { level in
+                        Text(level.label).tag(level)
                     }
-                    Slider(value: $settings.psk31Squelch, in: 0...1)
                 }
+                .pickerStyle(.segmented)
             } header: {
                 Text("Squelch")
             } footer: {
@@ -776,6 +957,8 @@ enum FrequencyReference {
             return bands.filter { $0.pskFreq != nil }
         case .olivia:
             return bands.filter { $0.oliviaFreq != nil }
+        case .rattlegram:
+            return bands  // Rattlegram works on any band
         }
     }
 }
@@ -894,6 +1077,8 @@ struct BandFrequencyRow: View {
             return band.pskFreq
         case .olivia:
             return band.oliviaFreq
+        case .rattlegram:
+            return band.pskFreq  // Use PSK frequency as reference
         }
     }
 
@@ -947,6 +1132,8 @@ struct CompactFrequencyReference: View {
             return band.pskFreq
         case .olivia:
             return band.oliviaFreq
+        case .rattlegram:
+            return band.pskFreq  // Use PSK frequency as reference
         }
     }
 }
