@@ -171,7 +171,22 @@ struct ChannelListContainer: View {
     let mode: DigitalMode
     @Binding var navigationPath: NavigationPath
     @EnvironmentObject var viewModel: ChatViewModel
+    @ObservedObject private var settings = SettingsManager.shared
     @State private var showingSettings = false
+
+    /// Subtitle showing configured baud rate for modes with adjustable settings
+    private var baudRateSubtitle: String {
+        switch mode {
+        case .rtty:
+            if settings.rttyBaudRate == 45.45 {
+                return String(localized: "45.45 Baud")
+            } else {
+                return String(localized: "\(Int(settings.rttyBaudRate)) Baud")
+            }
+        default:
+            return mode.subtitle
+        }
+    }
 
     var body: some View {
         ChannelListView()
@@ -198,7 +213,7 @@ struct ChannelListContainer: View {
                     VStack(spacing: 0) {
                         Text(mode.displayName)
                             .font(.headline)
-                        Text(mode.subtitle)
+                        Text(baudRateSubtitle)
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }

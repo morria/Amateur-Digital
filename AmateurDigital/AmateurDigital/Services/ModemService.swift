@@ -149,13 +149,36 @@ class ModemService: ObservableObject {
     /// Reconfigure modem with current settings (call when settings change)
     func reconfigureModem() {
         #if canImport(AmateurDigitalCore)
-        rttyModem = RTTYModem(configuration: currentRTTYConfiguration)
+        // Rebuild RTTY modem and multi-channel demodulator with new config
+        let rttyConfig = currentRTTYConfiguration
+        rttyModem = RTTYModem(configuration: rttyConfig)
         rttyModem?.delegate = self
+        let rttyFrequencies = stride(from: 900.0, through: 2500.0, by: 100.0).map { $0 }
+        multiChannelDemodulator = MultiChannelRTTYDemodulator(
+            frequencies: rttyFrequencies,
+            configuration: rttyConfig
+        )
+        multiChannelDemodulator?.delegate = self
         multiChannelDemodulator?.setSquelch(Float(settings.rttySquelch))
 
+        // Rebuild PSK modem and multi-channel demodulator with new config
         pskModem = PSKModem(configuration: currentPSKConfiguration)
         pskModem?.delegate = self
+        multiChannelPSKDemodulator = MultiChannelPSKDemodulator.standardSubband(
+            configuration: currentPSKConfiguration
+        )
+        multiChannelPSKDemodulator?.delegate = self
         multiChannelPSKDemodulator?.setSquelch(Float(settings.psk31Squelch))
+
+        // Update channel frequencies for the active mode
+        switch activeMode {
+        case .rtty:
+            channelFrequencies = multiChannelDemodulator?.channels.map { $0.frequency } ?? []
+        case .psk31, .bpsk63, .qpsk31, .qpsk63:
+            channelFrequencies = multiChannelPSKDemodulator?.channels.map { $0.frequency } ?? []
+        case .olivia:
+            break
+        }
         #endif
     }
 

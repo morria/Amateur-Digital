@@ -50,21 +50,23 @@ struct Channel: Identifiable, Equatable, Hashable {
     }
 
     /// Preview text for channel list
-    /// Shows real-time decoding buffer if active, otherwise last message
+    /// Shows the tail (most recent 2 lines) of real-time decoding buffer or last message
     var previewText: String {
-        // If currently decoding, show that (with newlines as spaces)
+        let raw: String
         if !decodingBuffer.isEmpty {
-            return decodingBuffer
-                .replacingOccurrences(of: "\n", with: " ")
-                .replacingOccurrences(of: "\r", with: " ")
+            raw = decodingBuffer
+        } else if let lastContent = messages.last?.content {
+            raw = lastContent
+        } else {
+            return ""
         }
-        // Otherwise show last message (with newlines as spaces)
-        if let lastContent = messages.last?.content {
-            return lastContent
-                .replacingOccurrences(of: "\n", with: " ")
-                .replacingOccurrences(of: "\r", with: " ")
-        }
-        return ""
+
+        // Split into lines, take the last 2 non-empty lines
+        let lines = raw.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let tail = lines.suffix(2)
+        return tail.joined(separator: "\n")
     }
 
     /// Time since last activity

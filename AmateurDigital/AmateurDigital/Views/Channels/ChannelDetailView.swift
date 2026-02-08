@@ -30,6 +30,20 @@ struct ChannelDetailView: View {
         return viewModel.isFrequencySafeForTransmission(channel.frequency)
     }
 
+    /// Title text showing mode name with configured baud rate for RTTY
+    private var modeTitleText: String {
+        switch viewModel.selectedMode {
+        case .rtty:
+            if settings.rttyBaudRate == 45.45 {
+                return "RTTY 45.45"
+            } else {
+                return "RTTY \(Int(settings.rttyBaudRate))"
+            }
+        default:
+            return viewModel.selectedMode.rawValue.uppercased()
+        }
+    }
+
     /// CQ calling message placeholder based on user's callsign, grid, and mode
     private var cqPlaceholder: String {
         let call = settings.callsign
@@ -182,7 +196,7 @@ struct ChannelDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 2) {
-                        Text(viewModel.selectedMode.rawValue.uppercased())
+                        Text(modeTitleText)
                             .font(.headline)
                         Text(channel.frequencyOffsetDisplay)
                             .font(.caption)

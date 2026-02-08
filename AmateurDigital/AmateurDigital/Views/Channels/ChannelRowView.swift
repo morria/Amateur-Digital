@@ -24,12 +24,12 @@ struct ChannelRowView: View {
                     .foregroundColor(.secondary)
             }
 
-            // Preview text
+            // Preview text (most recent 2 lines)
             Text(channel.previewText)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
-                .lineLimit(1)
-                .truncationMode(.head)
+                .lineLimit(2)
+                .truncationMode(.tail)
         }
         .padding(.vertical, 4)
     }

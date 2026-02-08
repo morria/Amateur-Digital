@@ -44,6 +44,7 @@ class ChatViewModel: ObservableObject {
     // MARK: - Services
     private let audioService: AudioService
     private let modemService: ModemService
+    private var settingsCancellables = Set<AnyCancellable>()
 
     // MARK: - Constants
     private let defaultComposeFrequency = 1500
@@ -98,6 +99,33 @@ class ChatViewModel: ObservableObject {
         audioService.onAudioInput = { [weak self] samples in
             self?.modemService.processRxSamples(samples)
         }
+
+        // Watch for RTTY settings changes and reconfigure modem
+        let settings = SettingsManager.shared
+        Publishers.Merge4(
+            settings.$rttyBaudRate.map { _ in () },
+            settings.$rttyMarkFreq.map { _ in () },
+            settings.$rttyShift.map { _ in () },
+            settings.$psk31CenterFreq.map { _ in () }
+        )
+        .dropFirst()  // Skip initial values
+        .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
+        .sink { [weak self] _ in
+            self?.modemService.reconfigureModem()
+        }
+        .store(in: &settingsCancellables)
+
+        // Watch for squelch changes separately (lighter update)
+        Publishers.Merge(
+            settings.$rttySquelch.map { _ in () },
+            settings.$psk31Squelch.map { _ in () }
+        )
+        .dropFirst()
+        .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
+        .sink { [weak self] _ in
+            self?.modemService.updateSquelch()
+        }
+        .store(in: &settingsCancellables)
 
         // Start audio service
         Task {
