@@ -119,6 +119,22 @@ struct ChannelDetailView: View {
                                 .id(message.id)
                                 .offset(x: dragOffset)
                             }
+
+                            // Live decoding buffer
+                            if !channel.decodingBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                HStack {
+                                    Text(channel.decodingBuffer.trimmingCharacters(in: .whitespacesAndNewlines))
+                                        .font(.system(.body, design: .monospaced))
+                                        .foregroundColor(.primary)
+                                        .padding(.horizontal, 14)
+                                        .padding(.vertical, 10)
+                                        .background(Color(.systemGray5).opacity(0.6))
+                                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                                    Spacer(minLength: 60)
+                                }
+                                .id("decodingBuffer")
+                                .offset(x: dragOffset)
+                            }
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -142,6 +158,13 @@ struct ChannelDetailView: View {
                         if let lastMessage = channel.messages.last {
                             withAnimation(.easeOut(duration: 0.3)) {
                                 proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                            }
+                        }
+                    }
+                    .onChange(of: channel.decodingBuffer) { _, _ in
+                        if !channel.decodingBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            withAnimation(.easeOut(duration: 0.3)) {
+                                proxy.scrollTo("decodingBuffer", anchor: .bottom)
                             }
                         }
                     }
@@ -231,11 +254,19 @@ struct ChannelDetailView: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 2) {
-                        Text(modeTitleText)
-                            .font(.headline)
-                        Text(channel.frequencyOffsetDisplay)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        if let callsign = channel.callsign {
+                            Text(callsign)
+                                .font(.headline)
+                            Text("\(modeTitleText)  \(channel.frequencyOffsetDisplay)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text(modeTitleText)
+                                .font(.headline)
+                            Text(channel.frequencyOffsetDisplay)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {

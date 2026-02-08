@@ -1,0 +1,175 @@
+[
+  {
+    "metadataOutputVersion" : "3.0",
+    "shortDescription" : "Classifies candidate callsigns as target (station to work) or not, based on contextual features from decoded amateur radio digital mode text.",
+    "outputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Int64",
+        "type" : "Int64",
+        "name" : "is_target",
+        "shortDescription" : ""
+      },
+      {
+        "isOptional" : "0",
+        "keyType" : "Int64",
+        "formattedType" : "Dictionary (Int64 → Double)",
+        "type" : "Dictionary",
+        "name" : "classProbability",
+        "shortDescription" : ""
+      }
+    ],
+    "modelParameters" : [
+
+    ],
+    "author" : "CallsignExtractor Training Pipeline",
+    "specificationVersion" : 1,
+    "isUpdatable" : "0",
+    "stateSchema" : [
+
+    ],
+    "availability" : {
+      "macOS" : "10.13",
+      "tvOS" : "11.0",
+      "visionOS" : "1.0",
+      "watchOS" : "4.0",
+      "iOS" : "11.0",
+      "macCatalyst" : "11.0"
+    },
+    "modelType" : {
+      "name" : "MLModelType_pipelineClassifier",
+      "structure" : [
+        {
+          "name" : "MLModelType_featureVectorizer"
+        },
+        {
+          "name" : "MLModelType_treeEnsembleClassifier"
+        }
+      ]
+    },
+    "inputSchema" : [
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "preceded_by_DE",
+        "shortDescription" : "1.0 if token before candidate is DE"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "preceded_by_CQ",
+        "shortDescription" : "1.0 if CQ precedes candidate"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "followed_by_DE",
+        "shortDescription" : "1.0 if DE follows candidate"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "followed_by_K",
+        "shortDescription" : "1.0 if end marker (K\/KN\/SK) follows"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "CQ_in_text",
+        "shortDescription" : "1.0 if CQ appears anywhere in text"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "is_first_call",
+        "shortDescription" : "1.0 if this is the first callsign"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "is_last_call",
+        "shortDescription" : "1.0 if this is the last callsign"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "position_norm",
+        "shortDescription" : "Normalized position in text (0-1)"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "n_unique_calls",
+        "shortDescription" : "Count of unique callsigns in text"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "appears_multiple",
+        "shortDescription" : "1.0 if candidate appears more than once"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "activity_word",
+        "shortDescription" : "1.0 if POTA\/SOTA\/TEST\/DX nearby"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "exchange_word",
+        "shortDescription" : "1.0 if RST\/NAME\/QTH nearby"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "preceded_by_call_DE",
+        "shortDescription" : "1.0 if pattern is CALL DE <this>"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "followed_by_call",
+        "shortDescription" : "1.0 if another callsign follows"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "text_starts_CQ",
+        "shortDescription" : "1.0 if text starts with CQ"
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "has_73_SK",
+        "shortDescription" : "1.0 if 73 or SK in text"
+      }
+    ],
+    "classLabels" : [
+      0,
+      1
+    ],
+    "generatedClassName" : "CallsignModel",
+    "userDefinedMetadata" : {
+      "com.github.apple.coremltools.version" : "9.0",
+      "com.github.apple.coremltools.source" : "scikit-learn==1.5.2"
+    },
+    "method" : "predict"
+  }
+]

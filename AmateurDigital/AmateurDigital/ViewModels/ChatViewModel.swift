@@ -8,6 +8,8 @@ import SwiftUI
 import Combine
 import AVFoundation
 import UIKit
+import HamTextClassifier
+import CallsignExtractor
 
 @MainActor
 class ChatViewModel: ObservableObject {
@@ -44,6 +46,8 @@ class ChatViewModel: ObservableObject {
     // MARK: - Services
     private let audioService: AudioService
     private let modemService: ModemService
+    private let textClassifier: HamTextClassifier?
+    private let callsignExtractor: CallsignExtractor?
     private var settingsCancellables = Set<AnyCancellable>()
 
     // MARK: - Constants
@@ -91,6 +95,8 @@ class ChatViewModel: ObservableObject {
     init() {
         self.audioService = AudioService()
         self.modemService = ModemService()
+        self.textClassifier = try? HamTextClassifier()
+        self.callsignExtractor = try? CallsignExtractor()
 
         // Set up modem delegate
         modemService.delegate = self
@@ -227,6 +233,12 @@ class ChatViewModel: ObservableObject {
 
         channels[index].messages.append(message)
         channels[index].lastActivity = Date()
+
+        // User transmitted on this channel — it's definitely a legit conversation
+        if channels[index].isLikelyLegitimate != true {
+            channels[index].isLikelyLegitimate = true
+            channels[index].classificationConfidence = 1.0
+        }
 
         // Clear received content time so next incoming content starts a new message
         lastReceivedContentTime[Double(channels[index].frequency)] = nil
@@ -426,6 +438,76 @@ class ChatViewModel: ObservableObject {
         print("[ChatViewModel] Playback complete")
     }
 
+    // MARK: - Text Classification
+
+    /// Classify channel content as legitimate ham radio or noise.
+    /// Gated to avoid excessive CoreML inference:
+    /// - Requires ≥5 chars and at least one space before first run
+    /// - Re-runs only every 5 new characters
+    /// - Stops once classified as legitimate, or after 48 chars still negative
+    private func classifyChannel(at channelIndex: Int, for mode: DigitalMode) {
+        guard let classifier = textClassifier else { return }
+        var modeChannels = channelsByMode[mode] ?? []
+        guard channelIndex < modeChannels.count else { return }
+
+        // Already classified as legitimate — done
+        if modeChannels[channelIndex].isLikelyLegitimate == true { return }
+
+        let text = modeChannels[channelIndex].previewText
+        let length = text.count
+
+        // Need at least 5 chars and one space (word boundary)
+        guard length >= 5, text.contains(" ") else { return }
+
+        // Stop checking after 48 chars if still negative
+        if modeChannels[channelIndex].isLikelyLegitimate == false, length > 48 { return }
+
+        // Only re-run every 5 characters of new content
+        guard length >= modeChannels[channelIndex].classifiedAtLength + 5 else { return }
+
+        let result = classifier.classify(text)
+        modeChannels[channelIndex].isLikelyLegitimate = result.isLegitimate
+        modeChannels[channelIndex].classificationConfidence = result.confidence
+        modeChannels[channelIndex].classifiedAtLength = length
+        channelsByMode[mode] = modeChannels
+    }
+
+    // MARK: - Callsign Extraction
+
+    /// Extract callsign from channel's decoded text using ML model.
+    /// Gated to avoid excessive CoreML inference:
+    /// - Only runs after classification marks channel as legitimate
+    /// - Requires ≥5 chars
+    /// - Re-runs only every 5 new characters
+    /// - Stops once a callsign is found
+    private func extractChannelCallsign(at channelIndex: Int, for mode: DigitalMode) {
+        guard let extractor = callsignExtractor else { return }
+        var modeChannels = channelsByMode[mode] ?? []
+        guard channelIndex < modeChannels.count else { return }
+
+        // Already have a callsign — done
+        guard modeChannels[channelIndex].callsign == nil else { return }
+
+        // Only extract after classification says it's legitimate
+        guard modeChannels[channelIndex].isLikelyLegitimate == true else { return }
+
+        let text = modeChannels[channelIndex].previewText
+        let length = text.count
+        guard length >= 5 else { return }
+
+        // Only re-run every 5 characters of new content
+        guard length >= modeChannels[channelIndex].extractedAtLength + 5 else { return }
+
+        modeChannels[channelIndex].extractedAtLength = length
+        if let callsign = extractor.extractCallsign(text) {
+            modeChannels[channelIndex].callsign = callsign
+            channelsByMode[mode] = modeChannels
+            print("[ChatViewModel] Extracted callsign \(callsign) on \(modeChannels[channelIndex].frequency) Hz")
+        } else {
+            channelsByMode[mode] = modeChannels
+        }
+    }
+
     // MARK: - Channel Management for RX
 
     /// Get or create a channel at the given frequency for a specific mode
@@ -528,7 +610,7 @@ class ChatViewModel: ObservableObject {
                 content: trimmedText,
                 direction: .received,
                 mode: messageMode,
-                callsign: nil,  // TODO: Extract callsign from text
+                callsign: nil,
                 transmitState: nil
             )
             modeChannels[channelIndex].messages.append(message)
@@ -553,6 +635,12 @@ class ChatViewModel: ObservableObject {
         var modeLastDecodeTime = lastDecodeTimeByMode[mode] ?? [:]
         modeLastDecodeTime[frequency] = nil
         lastDecodeTimeByMode[mode] = modeLastDecodeTime
+
+        // Classify channel content
+        classifyChannel(at: channelIndex, for: mode)
+
+        // Extract callsign from decoded text
+        extractChannelCallsign(at: channelIndex, for: mode)
     }
 }
 
@@ -629,6 +717,12 @@ extension ChatViewModel: ModemServiceDelegate {
         lastReceivedContentTimeByMode[mode] = updatedLastReceivedContentTime
 
         print("[ChatViewModel] Rattlegram RX on \(Int(frequency)) Hz from \(callSign ?? "unknown"): \"\(text)\" (\(bitFlips) flips)")
+
+        // Classify channel content
+        classifyChannel(at: channelIndex, for: mode)
+
+        // Extract callsign if not already set (Rattlegram header callsign takes priority)
+        extractChannelCallsign(at: channelIndex, for: mode)
     }
 
     /// Check if current input level is above the noise floor threshold

@@ -39,6 +39,8 @@
 		A10000000000000000000033 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000033 /* Localizable.xcstrings */; };
 		A10000000000000000000034 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000034 /* InfoPlist.xcstrings */; };
 		A10000000000000000000035 /* RattlegramCore in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000002 /* RattlegramCore */; };
+		A10000000000000000000036 /* HamTextClassifier in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000003 /* HamTextClassifier */; };
+		A10000000000000000000037 /* CallsignExtractor in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000004 /* CallsignExtractor */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -83,6 +85,8 @@
 			files = (
 				A10000000000000000000022 /* AmateurDigitalCore in Frameworks */,
 				A10000000000000000000035 /* RattlegramCore in Frameworks */,
+				A10000000000000000000036 /* HamTextClassifier in Frameworks */,
+				A10000000000000000000037 /* CallsignExtractor in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -266,6 +270,8 @@
 			packageProductDependencies = (
 				C10000000000000000000001 /* AmateurDigitalCore */,
 				C10000000000000000000002 /* RattlegramCore */,
+				C10000000000000000000003 /* HamTextClassifier */,
+				C10000000000000000000004 /* CallsignExtractor */,
 			);
 			productName = AmateurDigital;
 			productReference = A30000000000000000000001 /* AmateurDigital.app */;
@@ -306,6 +312,8 @@
 			packageReferences = (
 				D10000000000000000000001 /* XCLocalSwiftPackageReference "AmateurDigitalCore" */,
 				D10000000000000000000002 /* XCLocalSwiftPackageReference "RattlegramCore" */,
+				D10000000000000000000003 /* XCLocalSwiftPackageReference "HamTextClassifier" */,
+				D10000000000000000000004 /* XCLocalSwiftPackageReference "CallsignExtractor" */,
 			);
 			productRefGroup = A50000000000000000000003 /* Products */;
 			projectDirPath = "";
@@ -586,6 +594,14 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = RattlegramCore;
 		};
+		D10000000000000000000003 /* XCLocalSwiftPackageReference "HamTextClassifier" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = HamTextClassifier;
+		};
+		D10000000000000000000004 /* XCLocalSwiftPackageReference "CallsignExtractor" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = CallsignExtractor;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -596,6 +612,14 @@
 		C10000000000000000000002 /* RattlegramCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = RattlegramCore;
+		};
+		C10000000000000000000003 /* HamTextClassifier */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HamTextClassifier;
+		};
+		C10000000000000000000004 /* CallsignExtractor */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CallsignExtractor;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

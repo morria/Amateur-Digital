@@ -2,14 +2,15 @@
 
 ## Promotional Text
 <!-- 170 characters max. Can be updated without a new app version. -->
-Decode and transmit RTTY, PSK31, and other ham radio digital modes with a familiar chat interface. Free, open source, and no ads.
+Decode and transmit RTTY, PSK31, Rattlegram, and other ham radio digital modes with a familiar chat interface. Free, open source, and no ads.
 
 ## Description
 <!-- 4,000 characters max -->
 Amateur Digital turns your iPhone or iPad into a full-featured digital mode station for amateur radio. Connect a USB audio interface between your device and your HF transceiver, and you're on the air.
 
 SUPPORTED MODES
-- RTTY (45.45, 50, 75 Baud) — Classic radio teletype using 5-bit Baudot code
+- RTTY (45.45, 50, 75, 100 Baud) — Classic radio teletype using 5-bit Baudot code
+- Rattlegram — OFDM burst mode with polar error-correction codes, sends up to 170 bytes in ~1 second
 - PSK31 (31.25 Baud) — Narrowband phase-shift keying for keyboard-to-keyboard QSOs
 - BPSK63 (62.5 Baud) — Faster PSK for stronger signals
 - QPSK31 (31.25 Baud) — Four-phase PSK with 2x throughput
@@ -20,9 +21,6 @@ Monitor multiple signals simultaneously across the audio passband. The app autom
 
 IMESSAGE-STYLE INTERFACE
 A familiar chat interface makes digital modes approachable. Sent messages appear as blue bubbles, transmissions in progress are orange, and decoded signals appear as incoming messages. Swipe to reveal timestamps.
-
-AUTOMATIC GRID SQUARE
-Uses GPS to determine your Maidenhead grid locator automatically — perfect for portable and field operation. Enter your callsign once and it's ready for every QSO.
 
 BUILT-IN FREQUENCY REFERENCE
 Quick reference for digital mode calling frequencies on all HF bands from 160m through 6m, including WARC bands.
@@ -41,13 +39,13 @@ REQUIREMENTS
 
 ## Keywords
 <!-- 100 characters max, comma-separated, no spaces after commas -->
-RTTY,PSK31,ham,radio,HF,teletype,Baudot,Varicode,morse,shortwave,transceiver,QSO,decode,CW,SDR
+RTTY,PSK31,Rattlegram,OFDM,ham,radio,HF,teletype,Baudot,Varicode,shortwave,transceiver,QSO,decode
 
 ## Support URL
-https://w2asm.com/amateur-digital/support.html
+https://amateurdigital.app/support.html
 
 ## Marketing URL
-https://w2asm.com/amateur-digital/
+https://amateurdigital.app
 
 ## Version
 1.0

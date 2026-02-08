@@ -18,6 +18,10 @@ struct Channel: Identifiable, Equatable, Hashable {
     var rttyBaudRate: Double     // Per-channel RTTY baud rate (45.45, 50, 75)
     var polarityInverted: Bool   // Per-channel polarity inversion
     var frequencyOffset: Int     // Per-channel frequency offset in Hz (±50)
+    var isLikelyLegitimate: Bool?          // nil = not yet classified
+    var classificationConfidence: Double?   // 0.0-1.0
+    var classifiedAtLength: Int = 0        // previewText length at last classification run
+    var extractedAtLength: Int = 0         // previewText length at last callsign extraction run
 
     /// Default squelch threshold for new channels
     static let defaultSquelch = 0
@@ -32,7 +36,9 @@ struct Channel: Identifiable, Equatable, Hashable {
         squelch: Int = Channel.defaultSquelch,
         rttyBaudRate: Double = 45.45,
         polarityInverted: Bool = false,
-        frequencyOffset: Int = 0
+        frequencyOffset: Int = 0,
+        isLikelyLegitimate: Bool? = nil,
+        classificationConfidence: Double? = nil
     ) {
         self.id = id
         self.frequency = frequency
@@ -44,6 +50,8 @@ struct Channel: Identifiable, Equatable, Hashable {
         self.rttyBaudRate = rttyBaudRate
         self.polarityInverted = polarityInverted
         self.frequencyOffset = frequencyOffset
+        self.isLikelyLegitimate = isLikelyLegitimate
+        self.classificationConfidence = classificationConfidence
     }
 
     /// Display name: callsign if known, otherwise frequency

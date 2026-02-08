@@ -12,10 +12,31 @@ struct ChannelRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Top row: frequency offset and time
+            // Top row: callsign/frequency, classification indicator, and time
             HStack {
-                Text(channel.frequencyOffsetDisplay)
-                    .font(.headline)
+                if let callsign = channel.callsign {
+                    Text(callsign)
+                        .font(.headline)
+                        .bold()
+                    Text(channel.frequencyOffsetDisplay)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                } else {
+                    Text(channel.frequencyOffsetDisplay)
+                        .font(.headline)
+                }
+
+                if let isLegitimate = channel.isLikelyLegitimate {
+                    if isLegitimate, (channel.classificationConfidence ?? 0) > 0.7 {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.subheadline)
+                    } else {
+                        Image(systemName: "questionmark.circle")
+                            .foregroundColor(.secondary)
+                            .font(.subheadline)
+                    }
+                }
 
                 Spacer()
 

@@ -37,3 +37,9 @@ fastlane/test_output
 .idea/
 *.iml
 .reference
+todo.md
+
+# HamTextClassifier Training
+HamTextClassifierTraining/.venv/
+HamTextClassifierTraining/data/
+HamTextClassifierTraining/*.mlmodel

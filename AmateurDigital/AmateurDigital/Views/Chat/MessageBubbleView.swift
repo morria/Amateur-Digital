@@ -68,6 +68,17 @@ struct MessageBubbleView: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 2) {
+            // Callsign label for received messages
+            if isReceived, let callsign = message.callsign, !callsign.isEmpty {
+                HStack {
+                    Text(callsign)
+                        .font(.caption)
+                        .bold()
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+            }
+
             HStack(spacing: 8) {
                 // Timestamp (revealed on swipe)
                 if revealedTimestamp {
