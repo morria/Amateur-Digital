@@ -819,7 +819,8 @@ class ModemService: ObservableObject {
         encoder.configure(
             payload: payload,
             callSign: callSign,
-            carrierFrequency: carrierFreq
+            carrierFrequency: carrierFreq,
+            noiseSymbols: 6
         )
 
         var allSamples = [Float]()
