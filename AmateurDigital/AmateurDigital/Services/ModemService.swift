@@ -820,7 +820,8 @@ class ModemService: ObservableObject {
             payload: payload,
             callSign: callSign,
             carrierFrequency: carrierFreq,
-            noiseSymbols: 6
+            noiseSymbols: 6,
+            fancyHeader: true
         )
 
         var allSamples = [Float]()
@@ -830,6 +831,16 @@ class ModemService: ObservableObject {
         }
         // Final (silence) symbol
         allSamples.append(contentsOf: buf.map { Float($0) / 32768.0 })
+
+        // Normalize to match RTTY/PSK output levels (~0.9 peak)
+        // OFDM encoder conservatively peaks at ~50% to avoid clipping
+        let peak = allSamples.map { abs($0) }.max() ?? 0
+        if peak > 0 {
+            let scale = Float(0.9) / peak
+            for i in 0..<allSamples.count {
+                allSamples[i] *= scale
+            }
+        }
 
         return allSamples
     }

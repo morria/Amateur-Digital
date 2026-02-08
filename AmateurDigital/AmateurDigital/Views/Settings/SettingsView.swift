@@ -252,7 +252,7 @@ struct SettingsView: View {
                         HStack {
                             Text("Version")
                             Spacer()
-                            Text("1.0.1")
+                            Text("1.1")
                                 .foregroundColor(.secondary)
                         }
                     }

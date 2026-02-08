@@ -420,32 +420,9 @@ class ChatViewModel: ObservableObject {
             print("[ChatViewModel] Encoded \(text.count) chars at \(frequency) Hz -> \(combinedSamples.count) samples")
         }
 
-        // Create audio buffer from combined samples
-        guard let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: 48000,
-            channels: 1,
-            interleaved: false
-        ),
-        let buffer = AVAudioPCMBuffer(
-            pcmFormat: format,
-            frameCapacity: AVAudioFrameCount(combinedSamples.count)
-        ) else {
-            print("[ChatViewModel] Failed to create audio buffer")
-            throw AudioServiceError.encodingFailed
-        }
-
-        buffer.frameLength = AVAudioFrameCount(combinedSamples.count)
-        if let channelData = buffer.floatChannelData?[0] {
-            for (index, sample) in combinedSamples.enumerated() {
-                channelData[index] = sample
-            }
-        }
-
-        // Apply output gain from settings
+        // Apply output gain from settings and play
         audioService.outputGain = Float(SettingsManager.shared.outputGain)
-        // Play the audio buffer
-        try await audioService.playBuffer(buffer)
+        try await audioService.playSamples(combinedSamples)
         print("[ChatViewModel] Playback complete")
     }
 

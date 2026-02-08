@@ -51,7 +51,16 @@ struct ChannelDetailView: View {
         170 - messageText.utf8.count
     }
 
-    /// CQ calling message placeholder based on user's callsign, grid, and mode
+    /// Placeholder text: last sent message if user has transmitted, otherwise CQ calling message
+    private var inputPlaceholder: String {
+        if let channel = channel,
+           let lastSent = channel.messages.last(where: { $0.direction == .sent }) {
+            return lastSent.content
+        }
+        return cqPlaceholder
+    }
+
+    /// CQ calling message based on user's callsign, grid, and mode
     private var cqPlaceholder: String {
         let call = settings.callsign
         let grid = settings.effectiveGrid
@@ -186,7 +195,7 @@ struct ChannelDetailView: View {
                     }
 
                     HStack(spacing: 12) {
-                        TextField(cqPlaceholder, text: $messageText, axis: .vertical)
+                        TextField(inputPlaceholder, text: $messageText, axis: .vertical)
                             .textFieldStyle(.plain)
                             .font(.system(.body, design: .monospaced))
                             .padding(.horizontal, 12)
@@ -212,7 +221,7 @@ struct ChannelDetailView: View {
                                 .font(.system(size: 32))
                                 .foregroundColor(viewModel.isTransmitting ? .red : (isFrequencySafe ? .blue : .gray))
                         }
-                        .disabled(!isFrequencySafe || (viewModel.isTransmitting == false && messageText.isEmpty && cqPlaceholder.isEmpty) || (viewModel.selectedMode == .rattlegram && rattlegramBytesRemaining < 0))
+                        .disabled(!isFrequencySafe || (viewModel.isTransmitting == false && messageText.isEmpty && inputPlaceholder.isEmpty) || (viewModel.selectedMode == .rattlegram && rattlegramBytesRemaining < 0))
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -248,8 +257,8 @@ struct ChannelDetailView: View {
 
     private func sendMessage() {
         guard let channel = channel else { return }
-        // Use placeholder CQ message if text field is empty
-        let textToSend = messageText.isEmpty ? cqPlaceholder : messageText
+        // Use placeholder message if text field is empty (last sent message, or CQ if none)
+        let textToSend = messageText.isEmpty ? inputPlaceholder : messageText
         guard !textToSend.isEmpty else { return }
         viewModel.sendMessage(textToSend, toChannel: channel)
         messageText = ""
