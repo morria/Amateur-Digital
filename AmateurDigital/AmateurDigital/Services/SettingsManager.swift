@@ -178,7 +178,7 @@ class SettingsManager: NSObject, ObservableObject {
         self.rttyBaudRate = Self.initialLoadDouble(forKey: "rttyBaudRate", default: 45.45)
         self.rttyMarkFreq = Self.initialLoadDouble(forKey: "rttyMarkFreq", default: 2125.0)
         self.rttyShift = Self.initialLoadDouble(forKey: "rttyShift", default: 170.0)
-        self.rttySquelch = Self.initialLoadDouble(forKey: "rttySquelch", default: 0.3)
+        self.rttySquelch = Self.initialLoadDouble(forKey: "rttySquelch", default: 0.0)
         self.psk31CenterFreq = Self.initialLoadDouble(forKey: "psk31CenterFreq", default: 1000.0)
         self.psk31Squelch = Self.initialLoadDouble(forKey: "psk31Squelch", default: 0.3)
         self.outputGain = Self.initialLoadDouble(forKey: "outputGain", default: 1.0)

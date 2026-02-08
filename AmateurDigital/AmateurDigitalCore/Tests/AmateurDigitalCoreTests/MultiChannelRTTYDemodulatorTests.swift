@@ -228,8 +228,8 @@ final class MultiChannelRTTYDemodulatorTests: XCTestCase {
         let subband = MultiChannelRTTYDemodulator.standardSubband()
 
         XCTAssertGreaterThan(subband.channelCount, 0)
-        // Should cover common RTTY frequencies
-        XCTAssertNotNil(subband.channel(at: 2125))
+        // Should cover common RTTY frequencies (100 Hz spacing from 900-2500 Hz)
+        XCTAssertNotNil(subband.channel(at: 2100))
     }
 
     func testCoveringRange() {

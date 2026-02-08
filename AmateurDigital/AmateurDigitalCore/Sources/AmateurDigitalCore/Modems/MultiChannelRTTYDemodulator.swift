@@ -107,7 +107,7 @@ public final class MultiChannelRTTYDemodulator {
     }
 
     /// Whether AFC (Automatic Frequency Control) is enabled for all channels
-    public var afcEnabled: Bool = true {
+    public var afcEnabled: Bool = false {
         didSet {
             for demodulator in demodulators.values {
                 demodulator.afcEnabled = afcEnabled
@@ -166,6 +166,7 @@ public final class MultiChannelRTTYDemodulator {
         let demodulator = FSKDemodulator(configuration: config)
         demodulator.delegate = self
         demodulator.afcEnabled = afcEnabled
+        demodulator.minCharacterConfidence = 0.3
 
         demodulators[channel.id] = demodulator
         channelMap[channel.id] = channel
@@ -299,13 +300,12 @@ extension MultiChannelRTTYDemodulator: FSKDemodulatorDelegate {
 
 extension MultiChannelRTTYDemodulator {
 
-    /// Standard RTTY sub-band channels (170 Hz spacing)
+    /// Standard RTTY sub-band channels (100 Hz spacing)
     /// - Returns: Multi-channel demodulator for common RTTY frequencies
     public static func standardSubband() -> MultiChannelRTTYDemodulator {
-        // Common RTTY audio frequencies in the 300-3000 Hz passband
-        let frequencies: [Double] = [
-            1275, 1445, 1615, 1785, 1955, 2125, 2295, 2465
-        ]
+        // 100 Hz spacing gives max 50 Hz misalignment (vs 85 Hz with 170 Hz spacing).
+        // Covers 900-2500 Hz — the common USB audio passband for HF RTTY.
+        let frequencies = stride(from: 900.0, through: 2500.0, by: 100.0).map { $0 }
         return MultiChannelRTTYDemodulator(frequencies: frequencies)
     }
 
