@@ -89,18 +89,28 @@ public final class FSKDemodulator {
     /// Delegate for receiving decoded characters
     public weak var delegate: FSKDemodulatorDelegate?
 
-    /// Block size for Goertzel analysis (samples per bit / 4 for 4 measurements per bit)
-    private let analysisBlockSize: Int
+    /// Step size for state machine updates (samplesPerBit / 4).
+    /// 4 steps per bit gives fine timing resolution for accurate bit sampling.
+    private let stateStepSize: Int
 
-    /// Samples accumulated for current analysis block
+    /// Window size for Goertzel analysis (samplesPerBit / 2).
+    /// This larger window provides frequency resolution of 2*baudRate Hz, which gives good
+    /// discrimination for the standard 170 Hz shift at all baud rates.
+    /// At 45.45 baud / 170 Hz shift / 48 kHz: window=528 → resolution 91 Hz.
+    private let goertzelWindowSize: Int
+
+    /// Samples accumulated since last state machine step
     private var sampleBuffer: [Float] = []
+
+    /// Sliding analysis window for Goertzel computation (last goertzelWindowSize samples)
+    private var analysisWindow: [Float] = []
 
     /// Correlation history for signal detection (smoothing)
     private var correlationHistory: [Float] = []
 
-    /// Dynamic correlation history size (~1 bit period)
+    /// Dynamic correlation history size (~1 bit period worth of steps)
     private var correlationHistorySize: Int {
-        max(16, configuration.samplesPerBit / analysisBlockSize)
+        max(16, configuration.samplesPerBit / stateStepSize)
     }
 
     /// Threshold for mark/space decision
@@ -178,7 +188,7 @@ public final class FSKDemodulator {
     /// AFC tracking range in Hz (searches ±this value)
     public var afcRange: Float = 50.0
 
-    /// AFC update interval in analysis blocks (~2 bits at 4 blocks/bit)
+    /// AFC update interval in state steps (~2 bits at 4 steps/bit)
     private let afcUpdateInterval: Int = 8
 
     /// Counter for AFC update timing
@@ -211,19 +221,24 @@ public final class FSKDemodulator {
         self.configuration = configuration
         self.baudotCodec = BaudotCodec()
 
-        // Block size = 1/4 of samples per bit for 4 measurements per bit
-        self.analysisBlockSize = max(64, configuration.samplesPerBit / 4)
+        // State machine steps at samplesPerBit/4 for fine timing (4 steps per bit).
+        self.stateStepSize = max(16, configuration.samplesPerBit / 4)
+
+        // Goertzel window is samplesPerBit/2 for good frequency resolution.
+        // At 45.45 baud: 528 samples → 91 Hz resolution (good for 170 Hz shift).
+        // The window slides with 75% overlap, giving both fine timing AND good resolution.
+        self.goertzelWindowSize = max(64, configuration.samplesPerBit / 2)
 
         self.markFilter = GoertzelFilter(
             frequency: configuration.markFrequency,
             sampleRate: configuration.sampleRate,
-            blockSize: analysisBlockSize
+            blockSize: goertzelWindowSize
         )
 
         self.spaceFilter = GoertzelFilter(
             frequency: configuration.spaceFrequency,
             sampleRate: configuration.sampleRate,
-            blockSize: analysisBlockSize
+            blockSize: goertzelWindowSize
         )
 
         // Initialize bandpass filter for mark/space frequencies with 75 Hz margin
@@ -251,12 +266,12 @@ public final class FSKDemodulator {
             markOffsetFilters[offset] = GoertzelFilter(
                 frequency: configuration.markFrequency + Double(offset),
                 sampleRate: configuration.sampleRate,
-                blockSize: analysisBlockSize
+                blockSize: goertzelWindowSize
             )
             spaceOffsetFilters[offset] = GoertzelFilter(
                 frequency: configuration.spaceFrequency + Double(offset),
                 sampleRate: configuration.sampleRate,
-                blockSize: analysisBlockSize
+                blockSize: goertzelWindowSize
             )
         }
     }
@@ -305,12 +320,12 @@ public final class FSKDemodulator {
         markFilter = GoertzelFilter(
             frequency: newMarkFreq,
             sampleRate: configuration.sampleRate,
-            blockSize: analysisBlockSize
+            blockSize: goertzelWindowSize
         )
         spaceFilter = GoertzelFilter(
             frequency: newMarkFreq - configuration.shift,
             sampleRate: configuration.sampleRate,
-            blockSize: analysisBlockSize
+            blockSize: goertzelWindowSize
         )
 
         // Update bandpass filter center
@@ -345,9 +360,15 @@ public final class FSKDemodulator {
         let agcSample = applyAGC(filteredSample)
 
         sampleBuffer.append(agcSample)
+        analysisWindow.append(agcSample)
 
-        // When we have enough samples for analysis
-        if sampleBuffer.count >= analysisBlockSize {
+        // Trim sliding analysis window to goertzelWindowSize
+        if analysisWindow.count > goertzelWindowSize {
+            analysisWindow.removeFirst(analysisWindow.count - goertzelWindowSize)
+        }
+
+        // State machine step every stateStepSize samples
+        if sampleBuffer.count >= stateStepSize {
             let correlation = analyzeBlock()
             updateCorrelationHistory(correlation)
             updateNoiseFloor(correlation)
@@ -357,7 +378,7 @@ public final class FSKDemodulator {
             if afcEnabled {
                 afcBlockCounter += 1
                 if afcBlockCounter >= afcUpdateInterval {
-                    let correction = computeAFCCorrection(samples: sampleBuffer)
+                    let correction = computeAFCCorrection(samples: analysisWindow)
                     // Low-pass filter the correction for smooth tracking
                     frequencyCorrection = frequencyCorrection * (1 - afcAlpha) + correction * afcAlpha
 
@@ -413,11 +434,11 @@ public final class FSKDemodulator {
         noiseFloor = max(0.01, min(0.5, noiseFloor))
     }
 
-    /// Analyze the current sample buffer and return mark/space correlation
+    /// Analyze the sliding analysis window and return mark/space correlation
     /// - Returns: Correlation value: positive = mark, negative = space
     private func analyzeBlock() -> Float {
-        let markPower = markFilter.processBlock(sampleBuffer)
-        let spacePower = spaceFilter.processBlock(sampleBuffer)
+        let markPower = markFilter.processBlock(analysisWindow)
+        let spacePower = spaceFilter.processBlock(analysisWindow)
 
         markFilter.reset()
         spaceFilter.reset()
@@ -489,20 +510,23 @@ public final class FSKDemodulator {
 
     /// Process the state machine with current correlation value
     private func processStateMachine(correlation: Float) {
-        let samplesPerBlock = analysisBlockSize
+        let samplesPerStep = stateStepSize
         let samplesPerBit = configuration.samplesPerBit
-        let samplesPerHalfBit = samplesPerBit / 2
+        // Sample at 75% of the bit period to ensure we're past transition artifacts.
+        // With 4 steps per bit and a Goertzel window of samplesPerBit/2, the window
+        // at the 75% sample point covers 25-75% of the bit — entirely within the bit.
+        let bitSamplePoint = samplesPerBit * 3 / 4
 
         switch state {
         case .waitingForStart:
             // Looking for transition from mark to space (start of start bit)
             if correlation < -correlationThreshold {
                 // Detected space - could be start bit
-                state = .inStartBit(samplesProcessed: samplesPerBlock)
+                state = .inStartBit(samplesProcessed: samplesPerStep)
             }
 
         case .inStartBit(let samplesProcessed):
-            let newSamples = samplesProcessed + samplesPerBlock
+            let newSamples = samplesProcessed + samplesPerStep
 
             // Verify we're still in space for the start bit
             if correlation > correlationThreshold {
@@ -516,10 +540,10 @@ public final class FSKDemodulator {
             }
 
         case .receivingData(let bit, let samplesProcessed, var accumulator, var confidence):
-            let newSamples = samplesProcessed + samplesPerBlock
+            let newSamples = samplesProcessed + samplesPerStep
 
-            // Sample at center of bit
-            if samplesProcessed < samplesPerHalfBit && newSamples >= samplesPerHalfBit {
+            // Sample at 75% of bit to avoid transition artifacts
+            if samplesProcessed < bitSamplePoint && newSamples >= bitSamplePoint {
                 // Make decision based on current correlation
                 let decision = makeSoftDecision(correlation: correlation)
 
@@ -559,7 +583,7 @@ public final class FSKDemodulator {
             }
 
         case .inStopBits(let samplesProcessed, var markAccumulator, var sampleCount):
-            let newSamples = samplesProcessed + samplesPerBlock
+            let newSamples = samplesProcessed + samplesPerStep
             let stopBitSamples = Int(1.5 * Double(samplesPerBit))
 
             // Accumulate correlation during stop bits
@@ -614,6 +638,7 @@ public final class FSKDemodulator {
     public func reset() {
         state = .waitingForStart
         sampleBuffer.removeAll(keepingCapacity: true)
+        analysisWindow.removeAll(keepingCapacity: true)
         correlationHistory.removeAll(keepingCapacity: true)
         markFilter.reset()
         spaceFilter.reset()
@@ -637,13 +662,13 @@ public final class FSKDemodulator {
         markFilter = GoertzelFilter(
             frequency: configuration.markFrequency,
             sampleRate: configuration.sampleRate,
-            blockSize: analysisBlockSize
+            blockSize: goertzelWindowSize
         )
 
         spaceFilter = GoertzelFilter(
             frequency: configuration.spaceFrequency,
             sampleRate: configuration.sampleRate,
-            blockSize: analysisBlockSize
+            blockSize: goertzelWindowSize
         )
 
         bandpassFilter = BandpassFilter(

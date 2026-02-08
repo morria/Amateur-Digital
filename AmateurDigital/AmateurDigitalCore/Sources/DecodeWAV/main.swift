@@ -113,6 +113,55 @@ func textQuality(_ text: String) -> Double {
     return Double(good) / Double(text.count)
 }
 
+/// Score how much decoded text looks like real RTTY traffic vs random Baudot noise.
+/// Real RTTY has words separated by spaces, mostly letters, ham radio patterns.
+func rttyScore(_ text: String) -> Double {
+    guard text.count >= 3 else { return 0 }
+
+    // Split into words by whitespace and control chars
+    let words = text.split { c in
+        c == " " || c == "\r" || c == "\n"
+    }.map { String($0) }
+
+    guard !words.isEmpty else { return 0 }
+
+    // Metric 1: Average word length (real text: 2-8 chars, noise: very long or 1)
+    let avgWordLen = Double(words.map(\.count).reduce(0, +)) / Double(words.count)
+    let wordLenScore: Double
+    if avgWordLen >= 2 && avgWordLen <= 8 {
+        wordLenScore = 1.0
+    } else if avgWordLen >= 1 && avgWordLen <= 12 {
+        wordLenScore = 0.5
+    } else {
+        wordLenScore = 0.1
+    }
+
+    // Metric 2: Letter-to-digit ratio (real RTTY is mostly letters)
+    let letters = text.filter { $0.isLetter }.count
+    let digits = text.filter { $0.isNumber }.count
+    let symbols = text.filter { c in
+        if let a = c.asciiValue { return a >= 33 && a < 48 || a >= 58 && a < 65 }
+        return false
+    }.count
+    let letterRatio = Double(letters) / Double(max(1, letters + digits + symbols))
+    let letterScore = min(1.0, letterRatio * 1.5)  // bonus for high letter ratio
+
+    // Metric 3: Presence of ham radio patterns (CQ, DE, QRZ, callsign-like sequences)
+    let upper = text.uppercased()
+    var patternBonus = 0.0
+    if upper.contains("CQ") { patternBonus += 0.3 }
+    if upper.contains("DE ") { patternBonus += 0.2 }
+    if upper.contains("QRZ") { patternBonus += 0.2 }
+    if upper.contains("73") { patternBonus += 0.1 }
+    patternBonus = min(1.0, patternBonus)
+
+    // Metric 4: Has multiple words (real text has word structure)
+    let multiWordScore = words.count >= 2 ? 1.0 : 0.3
+
+    // Composite score
+    return (wordLenScore * 0.25 + letterScore * 0.25 + patternBonus * 0.3 + multiWordScore * 0.2) * Double(text.count)
+}
+
 // MARK: - PSK Decode
 
 class PSKDecodeDelegate: PSKDemodulatorDelegate {
@@ -229,17 +278,17 @@ func decodeRTTY(samples: [Float], sampleRate: Double) {
     print("Mode: RTTY (\(config.baudRate) baud, \(Int(config.shift)) Hz shift)")
     print("Samples per bit: \(config.samplesPerBit)")
 
-    // Scan mark frequencies from 500-3000 Hz at 10 Hz spacing
-    print("\n=== Frequency scan: 10 Hz spacing, 500-3000 Hz ===")
-    var bestFreqs: [(freq: Double, text: String, quality: Double)] = []
+    // Scan mark frequencies from 500-3500 Hz at 10 Hz spacing
+    print("\n=== Frequency scan: 10 Hz spacing, 500-3500 Hz ===")
+    var bestFreqs: [(freq: Double, text: String, score: Double, chars: Int)] = []
 
-    for markFreq in stride(from: 500.0, through: 3000.0, by: 10.0) {
+    for markFreq in stride(from: 500.0, through: 3500.0, by: 10.0) {
         let scanConfig = config.withCenterFrequency(markFreq)
         let demod = FSKDemodulator(configuration: scanConfig)
         let delegate = RTTYDecodeDelegate()
         demod.delegate = delegate
-        demod.squelchLevel = 0
-        demod.afcEnabled = false  // disable AFC for scanning
+        demod.afcEnabled = false
+        demod.minCharacterConfidence = 0.5
 
         let chunkSize = 4096
         var off = 0
@@ -251,43 +300,63 @@ func decodeRTTY(samples: [Float], sampleRate: Double) {
 
         let text = delegate.decoded
         if text.count >= 3 {
-            let q = textQuality(text)
-            bestFreqs.append((markFreq, text, q))
+            let score = rttyScore(text)
+            bestFreqs.append((markFreq, text, score, text.count))
         }
     }
 
-    bestFreqs.sort { $0.text.count > $1.text.count }
+    bestFreqs.sort { $0.score > $1.score }
     print("Frequencies with 3+ chars decoded (\(bestFreqs.count) total):")
     for r in bestFreqs.prefix(20) {
-        print("  \(String(format: "%7.0f", r.freq)) Hz mark: \(r.text.count) chars, quality=\(String(format: "%.0f%%", r.quality*100)) - \"\(printable(String(r.text.prefix(60))))\"")
+        print("  \(String(format: "%7.0f", r.freq)) Hz mark: \(r.chars) chars, score=\(String(format: "%.1f", r.score)) - \"\(printable(String(r.text.prefix(60))))\"")
     }
 
-    // Fine scan with AFC around top frequencies
+    // Fine decode for top frequencies: sweep ±20 Hz in 2 Hz steps
     if !bestFreqs.isEmpty {
-        print("\n=== Fine decode with AFC for top frequencies ===")
-        let topFreqs = bestFreqs.prefix(5).map { $0.freq }
+        print("\n=== Fine decode for top frequencies ===")
+        // Deduplicate nearby frequencies (within 50 Hz)
+        var topFreqs: [Double] = []
+        for r in bestFreqs {
+            if topFreqs.count >= 5 { break }
+            if topFreqs.allSatisfy({ abs($0 - r.freq) > 50 }) {
+                topFreqs.append(r.freq)
+            }
+        }
 
-        for markFreq in topFreqs {
-            let fineConfig = config.withCenterFrequency(markFreq)
-            let demod = FSKDemodulator(configuration: fineConfig)
-            let delegate = RTTYDecodeDelegate()
-            demod.delegate = delegate
-            demod.squelchLevel = 0
-            demod.afcEnabled = true
+        for coarseFreq in topFreqs {
+            var bestText = ""
+            var bestScore = 0.0
+            var bestFineFreq = coarseFreq
 
-            let chunkSize = 4096
-            var off = 0
-            while off < samples.count {
-                let end = min(off + chunkSize, samples.count)
-                demod.process(samples: Array(samples[off..<end]))
-                off = end
+            // Fine sweep ±20 Hz in 2 Hz steps
+            for fineFreq in stride(from: coarseFreq - 20, through: coarseFreq + 20, by: 2.0) {
+                let fineConfig = config.withCenterFrequency(fineFreq)
+                let demod = FSKDemodulator(configuration: fineConfig)
+                let delegate = RTTYDecodeDelegate()
+                demod.delegate = delegate
+                demod.afcEnabled = false
+                demod.minCharacterConfidence = 0.3
+
+                let chunkSize = 4096
+                var off = 0
+                while off < samples.count {
+                    let end = min(off + chunkSize, samples.count)
+                    demod.process(samples: Array(samples[off..<end]))
+                    off = end
+                }
+
+                let text = delegate.decoded
+                let score = rttyScore(text)
+                if score > bestScore {
+                    bestScore = score
+                    bestText = text
+                    bestFineFreq = fineFreq
+                }
             }
 
-            let text = delegate.decoded
-            let q = textQuality(text)
-            print("\n--- \(Int(markFreq)) Hz mark (AFC on) ---")
-            print("  \(text.count) chars, quality \(String(format: "%.0f%%", q*100))")
-            print("  Text: \"\(printable(String(text.prefix(200))))\"")
+            print("\n--- \(Int(coarseFreq)) Hz mark (fine-tuned to \(String(format: "%.0f", bestFineFreq)) Hz) ---")
+            print("  \(bestText.count) chars, score=\(String(format: "%.1f", bestScore))")
+            print("  Text: \"\(printable(String(bestText.prefix(200))))\"")
         }
     }
 }
