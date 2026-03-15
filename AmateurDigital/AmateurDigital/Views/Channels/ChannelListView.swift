@@ -107,6 +107,8 @@ struct ChannelSettingsSheet: View {
     @State private var baudRate: Double = 45.45
     @State private var polarityInverted: Bool = false
     @State private var frequencyOffset: Double = 0
+    @State private var cwWPM: Double = 20.0
+    @State private var cwToneFrequency: Double = 700.0
 
     /// Look up current channel from viewModel to get live data
     private var channel: Channel? {
@@ -116,6 +118,11 @@ struct ChannelSettingsSheet: View {
     /// Whether to show RTTY-specific settings
     private var isRTTY: Bool {
         viewModel.selectedMode == .rtty
+    }
+
+    /// Whether to show CW-specific settings
+    private var isCW: Bool {
+        viewModel.selectedMode == .cw
     }
 
     /// Whether baud rate differs from global setting
@@ -266,6 +273,76 @@ struct ChannelSettingsSheet: View {
                             Text("Fine-tune the receive frequency to improve decoding. Global default: \(settings.rttyFrequencyOffset) Hz.")
                         }
                     }
+
+                    if isCW {
+                        Section {
+                            VStack(alignment: .leading) {
+                                HStack {
+                                    Text("TX Speed")
+                                    Spacer()
+                                    Text("\(Int(cwWPM)) WPM")
+                                        .foregroundColor(.secondary)
+                                }
+                                Slider(value: $cwWPM, in: 5...45, step: 1)
+                                    .onChange(of: cwWPM) { _, newValue in
+                                        saveCWWPM(newValue)
+                                    }
+                            }
+
+                            if cwWPM != settings.cwWPM {
+                                Button("Reset to Global (\(Int(settings.cwWPM)) WPM)") {
+                                    cwWPM = settings.cwWPM
+                                    saveCWWPM(settings.cwWPM)
+                                }
+                                .font(.caption)
+                            }
+                        } header: {
+                            HStack {
+                                Text("CW Speed")
+                                if cwWPM != settings.cwWPM {
+                                    Text("overridden")
+                                        .font(.caption2)
+                                        .foregroundColor(.orange)
+                                }
+                            }
+                        } footer: {
+                            Text("TX speed for this conversation. RX adapts automatically to the sender's speed.")
+                        }
+
+                        Section {
+                            VStack(alignment: .leading) {
+                                HStack {
+                                    Text("Tone Frequency")
+                                    Spacer()
+                                    Text("\(Int(cwToneFrequency)) Hz")
+                                        .foregroundColor(.secondary)
+                                }
+                                Slider(value: $cwToneFrequency, in: 400...1200, step: 50)
+                                    .onChange(of: cwToneFrequency) { _, newValue in
+                                        saveCWToneFrequency(newValue)
+                                    }
+                            }
+
+                            if cwToneFrequency != settings.cwToneFrequency {
+                                Button("Reset to Global (\(Int(settings.cwToneFrequency)) Hz)") {
+                                    cwToneFrequency = settings.cwToneFrequency
+                                    saveCWToneFrequency(settings.cwToneFrequency)
+                                }
+                                .font(.caption)
+                            }
+                        } header: {
+                            HStack {
+                                Text("Tone Frequency")
+                                if cwToneFrequency != settings.cwToneFrequency {
+                                    Text("overridden")
+                                        .font(.caption2)
+                                        .foregroundColor(.orange)
+                                }
+                            }
+                        } footer: {
+                            Text("CW sidetone frequency. AFC tracks ±200 Hz from this setting.")
+                        }
+                    }
                 }
                 .navigationTitle("Channel Settings")
                 .navigationBarTitleDisplayMode(.inline)
@@ -280,7 +357,7 @@ struct ChannelSettingsSheet: View {
                 ContentUnavailableView("Channel Not Found", systemImage: "exclamationmark.triangle")
             }
         }
-        .presentationDetents([isRTTY ? .large : .medium])
+        .presentationDetents([(isRTTY || isCW) ? .large : .medium])
         .onAppear {
             // Load current values when sheet appears
             if let channel = channel {
@@ -288,6 +365,8 @@ struct ChannelSettingsSheet: View {
                 baudRate = channel.rttyBaudRate
                 polarityInverted = channel.polarityInverted
                 frequencyOffset = Double(channel.frequencyOffset)
+                cwWPM = channel.cwWPM
+                cwToneFrequency = channel.cwToneFrequency
                 print("[ChannelSettings] Loaded settings for channel \(channelID)")
             }
         }
@@ -296,6 +375,18 @@ struct ChannelSettingsSheet: View {
     private func saveSquelch(_ value: Int) {
         if let index = viewModel.channels.firstIndex(where: { $0.id == channelID }) {
             viewModel.channels[index].squelch = value
+        }
+    }
+
+    private func saveCWWPM(_ value: Double) {
+        if let index = viewModel.channels.firstIndex(where: { $0.id == channelID }) {
+            viewModel.channels[index].cwWPM = value
+        }
+    }
+
+    private func saveCWToneFrequency(_ value: Double) {
+        if let index = viewModel.channels.firstIndex(where: { $0.id == channelID }) {
+            viewModel.channels[index].cwToneFrequency = value
         }
     }
 }

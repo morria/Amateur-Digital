@@ -332,6 +332,8 @@ class ChatViewModel: ObservableObject {
             initialSquelch = Int(settings.rttySquelch * 100)
         case .psk31, .bpsk63, .qpsk31, .qpsk63:
             initialSquelch = Int(settings.psk31Squelch * 100)
+        case .cw:
+            initialSquelch = Int(settings.cwSquelch * 100)
         case .olivia, .rattlegram:
             initialSquelch = 0
         }
@@ -341,7 +343,9 @@ class ChatViewModel: ObservableObject {
             callsign: nil,
             messages: [],
             lastActivity: Date(),
-            squelch: initialSquelch
+            squelch: initialSquelch,
+            cwWPM: settings.cwWPM,
+            cwToneFrequency: settings.cwToneFrequency
         )
         channels.insert(newChannel, at: 0)
         return newChannel
@@ -527,6 +531,8 @@ class ChatViewModel: ObservableObject {
             initialSquelch = Int(settings.rttySquelch * 100)
         case .psk31, .bpsk63, .qpsk31, .qpsk63:
             initialSquelch = Int(settings.psk31Squelch * 100)
+        case .cw:
+            initialSquelch = Int(settings.cwSquelch * 100)
         case .olivia, .rattlegram:
             initialSquelch = 0
         }
@@ -536,7 +542,7 @@ class ChatViewModel: ObservableObject {
         let initialPolarity = mode == .rtty ? settings.rttyPolarityInverted : false
         let initialOffset = mode == .rtty ? settings.rttyFrequencyOffset : 0
 
-        // Create new channel with initial squelch and RTTY settings from global settings
+        // Create new channel with initial settings from global settings
         let newChannel = Channel(
             frequency: Int(frequency),
             callsign: nil,
@@ -545,7 +551,9 @@ class ChatViewModel: ObservableObject {
             squelch: initialSquelch,
             rttyBaudRate: initialBaudRate,
             polarityInverted: initialPolarity,
-            frequencyOffset: initialOffset
+            frequencyOffset: initialOffset,
+            cwWPM: settings.cwWPM,
+            cwToneFrequency: settings.cwToneFrequency
         )
         modeChannels.append(newChannel)
         channelsByMode[mode] = modeChannels

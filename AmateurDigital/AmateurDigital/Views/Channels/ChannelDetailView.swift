@@ -97,6 +97,13 @@ struct ChannelDetailView: View {
                 return "CQ CQ DE \(call) \(call) K"
             }
             return "CQ CQ DE \(call) \(call) \(grid) K"
+
+        case .cw:
+            // CW is uppercase (ham convention)
+            if grid.isEmpty {
+                return "CQ CQ CQ DE \(call) \(call) K"
+            }
+            return "CQ CQ CQ DE \(call) \(call) \(grid) K"
         }
     }
 

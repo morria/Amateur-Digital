@@ -447,6 +447,7 @@ struct SettingsView: View {
     }
 
     private var cwSettingsInline: some View {
+        Group {
         Section {
             VStack(alignment: .leading) {
                 HStack {
@@ -479,6 +480,22 @@ struct SettingsView: View {
             Text("CW sidetone frequency. AFC tracks ±200 Hz.")
         }
 
+        Section {
+            Picker("Squelch", selection: Binding(
+                get: { SquelchLevel.closest(to: settings.cwSquelch) },
+                set: { settings.cwSquelch = $0.rawValue }
+            )) {
+                ForEach(SquelchLevel.allCases) { level in
+                    Text(level.label).tag(level)
+                }
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Text("Squelch")
+        } footer: {
+            Text("Filters noise-induced false decodes. Can be overridden per conversation.")
+        }
+
         Section("Signal Parameters") {
             HStack {
                 Text("Modulation")
@@ -493,6 +510,7 @@ struct SettingsView: View {
                     .foregroundColor(.secondary)
             }
         }
+        } // Group
     }
 
     private var locationStatusText: String {
@@ -1069,6 +1087,22 @@ struct CWSettingsView: View {
                 Text("CW sidetone frequency. 700 Hz is standard. AFC will track ±200 Hz from this setting.")
             }
 
+            Section {
+                Picker("Squelch", selection: Binding(
+                    get: { SquelchLevel.closest(to: settings.cwSquelch) },
+                    set: { settings.cwSquelch = $0.rawValue }
+                )) {
+                    ForEach(SquelchLevel.allCases) { level in
+                        Text(level.label).tag(level)
+                    }
+                }
+                .pickerStyle(.segmented)
+            } header: {
+                Text("Squelch")
+            } footer: {
+                Text("Filters noise-induced false decodes. Can be overridden per conversation.")
+            }
+
             Section("Signal Parameters") {
                 HStack {
                     Text("Modulation")
@@ -1210,6 +1244,8 @@ struct BandFrequencyRow: View {
             return band.oliviaFreq
         case .rattlegram:
             return band.pskFreq  // Use PSK frequency as reference
+        case .cw:
+            return band.rttyFreq  // CW typically near RTTY frequencies
         }
     }
 
@@ -1265,6 +1301,8 @@ struct CompactFrequencyReference: View {
             return band.oliviaFreq
         case .rattlegram:
             return band.pskFreq  // Use PSK frequency as reference
+        case .cw:
+            return band.rttyFreq  // CW typically near RTTY frequencies
         }
     }
 }
