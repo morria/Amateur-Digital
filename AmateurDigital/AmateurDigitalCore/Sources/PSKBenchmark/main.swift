@@ -96,6 +96,7 @@ func applyTimingJitter(to signal: [Float], jitterSamples: Int, rng: inout Seeded
     return result
 }
 
+
 func applyFading(to signal: [Float], fadeRateHz: Double, fadeDepth: Float, sampleRate: Double) -> [Float] {
     let phaseIncrement = 2.0 * .pi * fadeRateHz / sampleRate
     var phase = 0.0
@@ -207,25 +208,16 @@ struct BenchmarkSuite {
         print()
 
         runCleanChannelTests()
-        print("Clean done")
         runNoiseSweepTests()
-        print("Noise done")
         runFrequencyOffsetTests()
-        print("Freq done")
         runNoiseAndOffsetComboTests()
-        print("Combo done")
         runTimingJitterTests()
-        print("Jitter done")
         runAdjacentChannelTests()
-        print("AdjCh done")
         runAllModesCleanTests()
-        print("AllModes done")
         runBPSK63StressTests()
-        print("BPSK63 done")
         runFadingChannelTests()
-        print("Fading done")
+        runLongMessageTests()
         runNoiseOnlyFalsePositiveTest()
-        print("FP done")
 
         printSummary()
     }
@@ -388,10 +380,9 @@ struct BenchmarkSuite {
         print()
     }
 
-    // MARK: - All Modes Clean
+    // MARK: - All Modes Comprehensive
 
     mutating func runAllModesCleanTests() {
-        print("--- All Modes (Clean Channel) ---")
         let text = "CQ CQ DE W1AW K"
         let modes: [(name: String, config: PSKConfiguration)] = [
             ("PSK31", .psk31),
@@ -400,6 +391,8 @@ struct BenchmarkSuite {
             ("QPSK63", .qpsk63),
         ]
 
+        // Clean channel
+        print("--- All Modes (Clean Channel) ---")
         for (modeName, config) in modes {
             let result = runSingleTest(
                 category: "all_modes", name: "clean", mode: modeName,
@@ -408,9 +401,9 @@ struct BenchmarkSuite {
             results.append(result)
             printResult(result)
         }
-
-        // Also test modes with moderate noise
         print()
+
+        // Moderate noise
         print("--- All Modes (15 dB SNR) ---")
         for (modeName, config) in modes {
             let result = runSingleTest(
@@ -419,6 +412,49 @@ struct BenchmarkSuite {
                 impairment: { samples in
                     var rng = SeededRandom(seed: 42)
                     return addWhiteNoise(to: samples, snrDB: 15, rng: &rng)
+                }
+            )
+            results.append(result)
+            printResult(result)
+        }
+        print()
+
+        // Frequency offset per mode — tests AFC across all modes
+        print("--- All Modes (+5 Hz Offset) ---")
+        for (modeName, config) in modes {
+            let result = runFreqOffsetTest(
+                category: "all_modes_offset", name: "+5Hz", mode: modeName,
+                baseConfig: config, text: text, offsetHz: 5
+            )
+            results.append(result)
+            printResult(result)
+        }
+        print()
+
+        // Fading per mode
+        print("--- All Modes (Fading) ---")
+        for (modeName, config) in modes {
+            let result = runSingleTest(
+                category: "all_modes_fading", name: "slow_deep", mode: modeName,
+                config: config, text: text,
+                impairment: { samples in
+                    applyFading(to: samples, fadeRateHz: 0.5, fadeDepth: 0.8, sampleRate: 48000)
+                }
+            )
+            results.append(result)
+            printResult(result)
+        }
+        print()
+
+        // Heavy noise per mode — tests decoder limits
+        print("--- All Modes (6 dB SNR) ---")
+        for (modeName, config) in modes {
+            let result = runSingleTest(
+                category: "all_modes_heavy_noise", name: "6dB_SNR", mode: modeName,
+                config: config, text: text,
+                impairment: { samples in
+                    var rng = SeededRandom(seed: 99)
+                    return addWhiteNoise(to: samples, snrDB: 6, rng: &rng)
                 }
             )
             results.append(result)
@@ -522,6 +558,67 @@ struct BenchmarkSuite {
         )
         results.append(result)
         printResult(result)
+        print()
+    }
+
+    // MARK: - Long Message Tests
+
+    mutating func runLongMessageTests() {
+        print("--- Long Message Tests ---")
+
+        // Long QSO exchange — tests sustained decoding
+        let longText = "CQ CQ CQ DE W1AW W1AW W1AW PSE K " +
+            "W1AW DE K1ABC K1ABC UR RST 599 599 QTH BOSTON MA NAME BOB HW CPY K " +
+            "K1ABC DE W1AW FB BOB UR RST 589 QTH NEWINGTON CT 73 SK"
+
+        // Clean channel long message
+        let result1 = runSingleTest(
+            category: "long_msg", name: "clean_long", mode: "PSK31",
+            config: .psk31, text: longText
+        )
+        results.append(result1)
+        printResult(result1)
+
+        // Long message with moderate noise
+        let result2 = runSingleTest(
+            category: "long_msg", name: "15dB_long", mode: "PSK31",
+            config: .psk31, text: longText,
+            impairment: { samples in
+                var rng = SeededRandom(seed: 777)
+                return addWhiteNoise(to: samples, snrDB: 15, rng: &rng)
+            }
+        )
+        results.append(result2)
+        printResult(result2)
+
+        // Long message with 5 Hz offset
+        let result3 = runFreqOffsetTest(
+            category: "long_msg", name: "+5Hz_long", mode: "PSK31",
+            baseConfig: .psk31, text: longText, offsetHz: 5
+        )
+        results.append(result3)
+        printResult(result3)
+
+        // Long message with fading + noise
+        let result4 = runSingleTest(
+            category: "long_msg", name: "fading_noise_long", mode: "PSK31",
+            config: .psk31, text: longText,
+            impairment: { samples in
+                var faded = applyFading(to: samples, fadeRateHz: 0.5, fadeDepth: 0.5, sampleRate: 48000)
+                var rng = SeededRandom(seed: 888)
+                return addWhiteNoise(to: faded, snrDB: 15, rng: &rng)
+            }
+        )
+        results.append(result4)
+        printResult(result4)
+
+        // BPSK63 long message
+        let bpskResult = runSingleTest(
+            category: "long_msg", name: "bpsk63_long", mode: "BPSK63",
+            config: .bpsk63, text: longText
+        )
+        results.append(bpskResult)
+        printResult(bpskResult)
         print()
     }
 
@@ -695,8 +792,12 @@ struct BenchmarkSuite {
             "adj_channel": 1.5,     // Selectivity
             "all_modes": 1.0,       // Mode coverage
             "all_modes_noisy": 1.5, // Mode robustness
+            "all_modes_offset": 1.5, // Mode AFC coverage
+            "all_modes_fading": 1.5, // Mode fading resilience
+            "all_modes_heavy_noise": 1.5, // Mode noise floor
             "bpsk63_stress": 1.5,   // BPSK63 under stress
             "fading": 2.0,          // HF fading is critical for real-world
+            "long_msg": 1.5,        // Sustained decode reliability
             "false_positive": 2.0,  // Must not decode noise as signal
         ]
 

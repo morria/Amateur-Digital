@@ -97,7 +97,8 @@ public final class PSKDemodulator {
     /// at 0° and 180° → |cos(Δφ)| ≈ 1.0. Noise has uniform random phase → ≈ 0.637.
     private var phaseQualityAccum: Double = 0
     private var phaseQualityCount: Int = 0
-    private let phaseQualityThreshold: Double = 0.70  // must exceed this to acquire signal
+    private var phaseQualityTotalSymbols: Int = 0     // total symbols since signal detected
+    private let phaseQualityThreshold: Double = 0.70  // quality must exceed this to sustain
 
     // MARK: - Bandpass Filter
 
@@ -422,6 +423,8 @@ public final class PSKDemodulator {
             return  // Don't decode during warmup — it's preamble
         }
 
+
+
         if configuration.modulationType == .bpsk {
             decodeBPSKSymbol(currentI: currentI, currentQ: currentQ)
         } else {
@@ -588,6 +591,12 @@ public final class PSKDemodulator {
         while phaseError < -.pi { phaseError += 2 * .pi }
         updateAFC(phaseError: phaseError)
 
+        // Phase quality: residual phase after removing decided quadrant
+        // should be near 0 for real signals. Use same metric as BPSK (cos(error))
+        // since the residual is already in [-π/4, π/4] for correct decisions.
+        phaseQualityAccum += abs(cos(phaseError))
+        phaseQualityCount += 1
+
         // Feed both bits to Varicode decoder
         if let char1 = varicodeCodec.decode(bit: b1) {
             delegate?.demodulator(
@@ -683,11 +692,20 @@ public final class PSKDemodulator {
         // Require persistence to acquire, drop if below sustain OR phase quality degrades
         let newDetected: Bool
         if _signalDetected {
-            // Once detected, check phase quality periodically to drop false detections
-            // Phase quality is only available after decode starts (BPSK/QPSK compute it)
-            let phaseQuality = phaseQualityCount >= 8
-                ? phaseQualityAccum / Double(phaseQualityCount) : 1.0
-            let qualityOK = phaseQuality > phaseQualityThreshold
+            phaseQualityTotalSymbols += 1
+
+            // Grace period: don't check phase quality until AFC has had time to converge
+            // After grace period, check quality periodically to drop false detections
+            let qualityOK: Bool
+            if phaseQualityTotalSymbols < 12 {
+                qualityOK = true  // Assume good during AFC convergence
+            } else if phaseQualityCount >= 8 {
+                let phaseQuality = phaseQualityAccum / Double(phaseQualityCount)
+                qualityOK = phaseQuality > phaseQualityThreshold
+            } else {
+                qualityOK = true  // Not enough samples yet
+            }
+
             newDetected = snr > sustainThreshold && qualityOK
 
             // Reset phase quality accumulator periodically for fresh measurements
@@ -705,6 +723,7 @@ public final class PSKDemodulator {
                 signalPersistCount = 0
                 phaseQualityAccum = 0
                 phaseQualityCount = 0
+                phaseQualityTotalSymbols = 0
             }
             delegate?.demodulator(
                 self,
@@ -735,6 +754,7 @@ public final class PSKDemodulator {
         signalPersistCount = 0
         phaseQualityAccum = 0
         phaseQualityCount = 0
+        phaseQualityTotalSymbols = 0
         afcPhaseCorrection = 0
         afcIntegrator = 0
         afcSymbolCount = 0
