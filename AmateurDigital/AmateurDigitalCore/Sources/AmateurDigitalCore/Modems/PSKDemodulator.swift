@@ -591,6 +591,12 @@ public final class PSKDemodulator {
         while phaseError < -.pi { phaseError += 2 * .pi }
         updateAFC(phaseError: phaseError)
 
+        // Phase quality: residual phase after removing decided quadrant
+        // should be near 0 for real signals. Use same metric as BPSK (cos(error))
+        // since the residual is already in [-π/4, π/4] for correct decisions.
+        phaseQualityAccum += abs(cos(phaseError))
+        phaseQualityCount += 1
+
         // Feed both bits to Varicode decoder
         if let char1 = varicodeCodec.decode(bit: b1) {
             delegate?.demodulator(
