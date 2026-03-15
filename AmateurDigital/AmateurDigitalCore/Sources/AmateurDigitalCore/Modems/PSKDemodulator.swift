@@ -37,15 +37,18 @@ public protocol PSKDemodulatorDelegate: AnyObject {
 /// Converts PSK audio samples to text using IQ (quadrature) demodulation.
 /// Supports both BPSK (2-phase) and QPSK (4-phase) demodulation.
 ///
-/// Demodulation approach:
-/// 1. Mix signal with local oscillator (I and Q channels)
-/// 2. IIR lowpass filter (bandwidth matched to symbol rate)
-/// 3. Sample filtered I/Q at symbol boundaries
-/// 4. Symbol timing recovery using early-late amplitude comparison
-/// 5. Differential phase detection (compare current vs previous symbol)
+/// Signal processing pipeline:
+/// 1. Bandpass filter to reject out-of-band noise
+/// 2. AGC to normalize signal level for fading HF conditions
+/// 3. Mix signal with local oscillator (I and Q channels)
+/// 4. IIR lowpass filter (bandwidth matched to symbol rate)
+/// 5. Sample filtered I/Q at symbol boundaries
+/// 6. Symbol timing recovery using early-late amplitude comparison
+/// 7. Differential phase detection (compare current vs previous symbol)
 ///    - BPSK: Dot product sign check for 180° detection
 ///    - QPSK: atan2 phase calculation, quantize to nearest quadrant
-/// 6. Varicode decoding to characters
+/// 8. AFC (Automatic Frequency Control) via phase residual tracking
+/// 9. Varicode decoding to characters
 ///
 /// Example usage:
 /// ```swift
@@ -87,11 +90,86 @@ public final class PSKDemodulator {
     private var noisePower: Double = 0.001
     private var _signalDetected: Bool = false
 
+    // MARK: - Bandpass Filter
+
+    /// Bandpass filter for out-of-band noise rejection
+    private var bandpassFilter: BandpassFilter
+
+    // MARK: - AGC Properties
+
+    /// AGC gain factor
+    private var agcGain: Float = 1.0
+
+    /// Target signal level for AGC
+    private let agcTarget: Float = 0.5
+
+    /// AGC attack rate (fast response to strong signals)
+    private let agcAttack: Float = 0.01
+
+    /// AGC decay rate (slow recovery from weak signals)
+    private let agcDecay: Float = 0.0001
+
+    /// Minimum AGC gain
+    private let agcMinGain: Float = 0.1
+
+    /// Maximum AGC gain
+    private let agcMaxGain: Float = 10.0
+
+    // MARK: - Adaptive Squelch Properties
+
+    /// Tracked noise floor level
+    private var noiseFloor: Float = 0.1
+
+    /// Noise floor tracking rate for signals below current floor
+    private let noiseTrackingFast: Float = 0.01
+
+    /// Noise floor tracking rate for signals near current floor
+    private let noiseTrackingSlow: Float = 0.001
+
+    /// Multiplier for noise floor to get squelch level
+    private let squelchMultiplier: Float = 3.0
+
+    /// Adaptive squelch level (computed from noise floor)
+    public var adaptiveSquelchLevel: Float {
+        noiseFloor * squelchMultiplier
+    }
+
+    // MARK: - AFC Properties
+
+    /// Whether AFC (Automatic Frequency Control) is enabled
+    public var afcEnabled: Bool = true
+
+    /// Current frequency correction in Hz (read-only)
+    public private(set) var frequencyCorrection: Double = 0
+
+    /// AFC phase correction per sample (precomputed from frequencyCorrection)
+    private var afcPhaseCorrection: Double = 0
+
+    /// AFC smoothing coefficient (0-1, lower = slower tracking)
+    private let afcAlpha: Double = 0.05
+
+    /// Phase residual accumulator for AFC
+    private var phaseResidualAccum: Double = 0
+    private var phaseResidualCount: Int = 0
+
+    /// AFC update interval in symbols
+    private let afcUpdateInterval: Int = 8
+
+    /// Counter for AFC update timing
+    private var afcSymbolCounter: Int = 0
+
+    // MARK: - Public Properties
+
     /// Delegate for receiving decoded characters
     public weak var delegate: PSKDemodulatorDelegate?
 
-    /// Squelch level (0.0-1.0). Characters below this SNR are suppressed.
-    public var squelchLevel: Float = 0.3
+    /// Manual squelch level override (0.0-1.0). Set to 0 to use adaptive squelch.
+    public var squelchLevel: Float = 0
+
+    /// Effective squelch level (uses manual if set, otherwise adaptive)
+    private var effectiveSquelchLevel: Float {
+        squelchLevel > 0 ? squelchLevel : adaptiveSquelchLevel
+    }
 
     /// Center frequency
     public var centerFrequency: Double {
@@ -129,6 +207,15 @@ public final class PSKDemodulator {
     public init(configuration: PSKConfiguration = .standard) {
         self.configuration = configuration
         self.varicodeCodec = VaricodeCodec()
+
+        // Initialize bandpass filter centered on the carrier frequency
+        // Margin: at least 50 Hz or 1.5× baud rate, whichever is larger
+        let margin = max(50.0, configuration.baudRate * 1.5)
+        self.bandpassFilter = BandpassFilter(
+            lowCutoff: configuration.centerFrequency - margin,
+            highCutoff: configuration.centerFrequency + margin,
+            sampleRate: configuration.sampleRate
+        )
     }
 
     /// IIR filter coefficient, computed from baud rate and sample rate.
@@ -150,16 +237,24 @@ public final class PSKDemodulator {
 
     /// Process a single audio sample
     private func processSample(_ sample: Float) {
-        let sampleD = Double(sample)
+        // Apply bandpass filter to reject out-of-band noise
+        let filteredSample = bandpassFilter.process(sample)
+
+        // Apply AGC to normalize signal level
+        let agcSample = applyAGC(filteredSample)
+
+        let sampleD = Double(agcSample)
 
         // Mix with local oscillator (quadrature demodulation)
         let i = sampleD * cos(localPhase)
         let q = sampleD * -sin(localPhase)
 
-        // Advance local oscillator phase
-        localPhase += configuration.phaseIncrementPerSample
+        // Advance local oscillator phase (with AFC correction)
+        localPhase += configuration.phaseIncrementPerSample + afcPhaseCorrection
         if localPhase >= 2.0 * .pi {
             localPhase -= 2.0 * .pi
+        } else if localPhase < 0 {
+            localPhase += 2.0 * .pi
         }
 
         // IIR lowpass filter — bandwidth matched to ~1.5× symbol rate
@@ -195,6 +290,49 @@ public final class PSKDemodulator {
         }
     }
 
+    // MARK: - AGC
+
+    /// Apply AGC to normalize signal level
+    /// - Parameter sample: Input sample
+    /// - Returns: Gain-adjusted sample
+    private func applyAGC(_ sample: Float) -> Float {
+        let output = sample * agcGain
+        let level = abs(output)
+
+        if level > agcTarget {
+            // Fast attack - reduce gain quickly for strong signals
+            agcGain *= (1.0 - agcAttack)
+        } else {
+            // Slow decay - increase gain slowly for weak signals
+            agcGain *= (1.0 + agcDecay)
+        }
+
+        // Clamp gain to reasonable range
+        agcGain = max(agcMinGain, min(agcMaxGain, agcGain))
+
+        return output
+    }
+
+    // MARK: - Adaptive Noise Floor
+
+    /// Update noise floor estimate from symbol magnitude
+    /// - Parameter magnitude: Current symbol magnitude
+    private func updateNoiseFloor(_ magnitude: Float) {
+        if magnitude < noiseFloor {
+            // Signal is below noise floor - track quickly
+            noiseFloor = noiseFloor * (1.0 - noiseTrackingFast) + magnitude * noiseTrackingFast
+        } else if magnitude < noiseFloor * 2.0 {
+            // Signal is near noise floor - track slowly
+            noiseFloor = noiseFloor * (1.0 - noiseTrackingSlow) + magnitude * noiseTrackingSlow
+        }
+        // Signals well above noise floor don't update the floor
+
+        // Keep noise floor in reasonable range
+        noiseFloor = max(0.01, min(0.5, noiseFloor))
+    }
+
+    // MARK: - Symbol Processing
+
     /// Process a complete symbol
     private func processSymbol() {
         // Symbol timing recovery: compare amplitude at 25% vs 75% of symbol.
@@ -213,12 +351,19 @@ public final class PSKDemodulator {
         let currentI = onTimeAccumI
         let currentQ = onTimeAccumQ
 
-        // Update signal detection
+        // Update signal detection with adaptive noise floor
         let symbolPower = currentI * currentI + currentQ * currentQ
+        let symbolMag = Float(sqrt(symbolPower))
+        updateNoiseFloor(symbolMag)
         updateSignalDetection(symbolPower: symbolPower)
 
+        // AFC: accumulate phase residual when signal is detected
+        if afcEnabled && _signalDetected {
+            accumulateAFCResidual(currentI: currentI, currentQ: currentQ)
+        }
+
         // Only decode if signal is detected and above squelch
-        guard _signalDetected && signalStrength >= squelchLevel else {
+        guard _signalDetected && signalStrength >= effectiveSquelchLevel else {
             prevI = currentI
             prevQ = currentQ
             return
@@ -234,6 +379,69 @@ public final class PSKDemodulator {
         prevI = currentI
         prevQ = currentQ
     }
+
+    // MARK: - AFC
+
+    /// Accumulate phase residual for AFC frequency correction
+    private func accumulateAFCResidual(currentI: Double, currentQ: Double) {
+        // Only compute residual if we have a valid previous symbol
+        guard prevI != 0 || prevQ != 0 else { return }
+
+        let currentPhase = atan2(currentQ, currentI)
+        let prevPhase = atan2(prevQ, prevI)
+
+        var phaseDiff = currentPhase - prevPhase
+        // Normalize to [-π, π]
+        while phaseDiff > .pi { phaseDiff -= 2 * .pi }
+        while phaseDiff < -.pi { phaseDiff += 2 * .pi }
+
+        // Remove data modulation to get residual frequency error
+        let residual: Double
+        if configuration.modulationType == .bpsk {
+            // BPSK: expected phase changes are 0 or π
+            if abs(phaseDiff) < .pi / 2 {
+                residual = phaseDiff  // Data was 0 (no phase change)
+            } else {
+                residual = phaseDiff > 0 ? phaseDiff - .pi : phaseDiff + .pi
+            }
+        } else {
+            // QPSK: expected phase changes are multiples of π/2
+            let quadrant = (phaseDiff / (.pi / 2)).rounded()
+            residual = phaseDiff - quadrant * (.pi / 2)
+        }
+
+        phaseResidualAccum += residual
+        phaseResidualCount += 1
+
+        afcSymbolCounter += 1
+        if afcSymbolCounter >= afcUpdateInterval {
+            applyAFCCorrection()
+            afcSymbolCounter = 0
+        }
+    }
+
+    /// Apply accumulated AFC correction to the local oscillator
+    private func applyAFCCorrection() {
+        guard phaseResidualCount > 0 else { return }
+
+        let avgResidual = phaseResidualAccum / Double(phaseResidualCount)
+
+        // Convert phase residual per symbol to frequency error in Hz
+        // freqError = avgResidual × baudRate / (2π)
+        let freqError = avgResidual * configuration.baudRate / (2 * .pi)
+
+        // Smooth the correction
+        frequencyCorrection = frequencyCorrection * (1 - afcAlpha) + freqError * afcAlpha
+
+        // Update phase correction per sample
+        afcPhaseCorrection = 2.0 * .pi * frequencyCorrection / configuration.sampleRate
+
+        // Reset accumulator
+        phaseResidualAccum = 0
+        phaseResidualCount = 0
+    }
+
+    // MARK: - BPSK/QPSK Decode
 
     /// Decode BPSK symbol using dot product phase detection
     private func decodeBPSKSymbol(currentI: Double, currentQ: Double) {
@@ -374,12 +582,29 @@ public final class PSKDemodulator {
         noisePower = 0.001
         _signalDetected = false
         varicodeCodec.reset()
+        bandpassFilter.reset()
+        agcGain = 1.0
+        noiseFloor = 0.1
+        frequencyCorrection = 0
+        afcPhaseCorrection = 0
+        phaseResidualAccum = 0
+        phaseResidualCount = 0
+        afcSymbolCounter = 0
     }
 
     /// Tune to a different center frequency
     /// - Parameter frequency: New center frequency in Hz
     public func tune(to frequency: Double) {
         configuration = configuration.withCenterFrequency(frequency)
+
+        // Rebuild bandpass filter for new frequency
+        let margin = max(50.0, configuration.baudRate * 1.5)
+        bandpassFilter = BandpassFilter(
+            lowCutoff: configuration.centerFrequency - margin,
+            highCutoff: configuration.centerFrequency + margin,
+            sampleRate: configuration.sampleRate
+        )
+
         reset()
     }
 }
