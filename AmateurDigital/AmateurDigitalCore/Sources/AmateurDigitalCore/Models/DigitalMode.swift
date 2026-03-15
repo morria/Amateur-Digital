@@ -12,6 +12,7 @@ public enum DigitalMode: String, CaseIterable, Identifiable, Codable {
     case qpsk31 = "QPSK31"
     case qpsk63 = "QPSK63"
     case olivia = "Olivia"
+    case cw = "CW"
 
     public var id: String { rawValue }
 
@@ -23,6 +24,7 @@ public enum DigitalMode: String, CaseIterable, Identifiable, Codable {
         case .qpsk31: return "QPSK31"
         case .qpsk63: return "QPSK63"
         case .olivia: return "Olivia 8/250"
+        case .cw: return "CW (Morse)"
         }
     }
 
@@ -40,6 +42,8 @@ public enum DigitalMode: String, CaseIterable, Identifiable, Codable {
             return "Quadrature PSK at 62.5 baud - 4x throughput"
         case .olivia:
             return "Olivia MFSK - Excellent weak signal performance"
+        case .cw:
+            return "CW (Morse Code) - On-off keyed tone, 5-60 WPM"
         }
     }
 
@@ -51,6 +55,7 @@ public enum DigitalMode: String, CaseIterable, Identifiable, Codable {
         case .qpsk31: return 1000.0 // Same as PSK31
         case .qpsk63: return 1000.0 // Same as PSK31
         case .olivia: return 1500.0 // Olivia center frequency
+        case .cw: return 700.0      // Standard CW sidetone
         }
     }
 
@@ -59,9 +64,14 @@ public enum DigitalMode: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .psk31, .bpsk63, .qpsk31, .qpsk63:
             return true
-        case .rtty, .olivia:
+        case .rtty, .olivia, .cw:
             return false
         }
+    }
+
+    /// Whether this is CW mode
+    public var isCWMode: Bool {
+        self == .cw
     }
 
     /// Get PSK configuration for PSK modes, nil for non-PSK modes
@@ -71,7 +81,15 @@ public enum DigitalMode: String, CaseIterable, Identifiable, Codable {
         case .bpsk63: return .bpsk63
         case .qpsk31: return .qpsk31
         case .qpsk63: return .qpsk63
-        case .rtty, .olivia: return nil
+        case .rtty, .olivia, .cw: return nil
+        }
+    }
+
+    /// Get CW configuration for CW mode, nil for other modes
+    public var cwConfiguration: CWConfiguration? {
+        switch self {
+        case .cw: return .standard
+        default: return nil
         }
     }
 }

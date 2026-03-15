@@ -184,6 +184,14 @@ struct SettingsView: View {
                             }
                         }
 
+                        if shouldShowModeSettings(.cw) {
+                            NavigationLink {
+                                CWSettingsView()
+                            } label: {
+                                Label("CW Settings", systemImage: "dot.radiowaves.right")
+                            }
+                        }
+
                         if shouldShowModeSettings(.olivia) {
                             NavigationLink {
                                 Text("Olivia Settings - Coming Soon")
@@ -209,6 +217,9 @@ struct SettingsView: View {
                         }
                         Toggle(isOn: $settings.enableRattlegram) {
                             Label("Rattlegram", systemImage: "bolt.horizontal")
+                        }
+                        Toggle(isOn: $settings.enableCW) {
+                            Label("CW (Morse)", systemImage: "dot.radiowaves.right")
                         }
                     } header: {
                         HStack {
@@ -239,6 +250,8 @@ struct SettingsView: View {
                         rttySettingsInline
                     } else if filterMode?.isPSKMode == true {
                         pskSettingsInline
+                    } else if filterMode == .cw {
+                        cwSettingsInline
                     } else if filterMode == .olivia {
                         Section("Olivia Settings") {
                             Text("Coming Soon")
@@ -429,6 +442,55 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("Band Reference")
+            }
+        }
+    }
+
+    private var cwSettingsInline: some View {
+        Section {
+            VStack(alignment: .leading) {
+                HStack {
+                    Text("Speed")
+                    Spacer()
+                    Text("\(Int(settings.cwWPM)) WPM")
+                        .foregroundColor(.secondary)
+                }
+                Slider(value: $settings.cwWPM, in: 5...45, step: 1)
+            }
+        } header: {
+            Text("Speed")
+        } footer: {
+            Text("Initial speed. Decoder adapts automatically (5-60 WPM).")
+        }
+
+        Section {
+            VStack(alignment: .leading) {
+                HStack {
+                    Text("Tone Frequency")
+                    Spacer()
+                    Text("\(Int(settings.cwToneFrequency)) Hz")
+                        .foregroundColor(.secondary)
+                }
+                Slider(value: $settings.cwToneFrequency, in: 400...1200, step: 50)
+            }
+        } header: {
+            Text("Frequency")
+        } footer: {
+            Text("CW sidetone frequency. AFC tracks ±200 Hz.")
+        }
+
+        Section("Signal Parameters") {
+            HStack {
+                Text("Modulation")
+                Spacer()
+                Text("OOK (On-Off Keying)")
+                    .foregroundColor(.secondary)
+            }
+            HStack {
+                Text("Dit Duration")
+                Spacer()
+                Text("\(Int(1200.0 / settings.cwWPM)) ms")
+                    .foregroundColor(.secondary)
             }
         }
     }
@@ -960,9 +1022,75 @@ enum FrequencyReference {
             return bands.filter { $0.pskFreq != nil }
         case .olivia:
             return bands.filter { $0.oliviaFreq != nil }
+        case .cw:
+            return bands  // CW works on any band
         case .rattlegram:
             return bands  // Rattlegram works on any band
         }
+    }
+}
+
+// MARK: - CW Settings View
+
+struct CWSettingsView: View {
+    @ObservedObject private var settings = SettingsManager.shared
+
+    var body: some View {
+        Form {
+            Section {
+                VStack(alignment: .leading) {
+                    HStack {
+                        Text("Speed")
+                        Spacer()
+                        Text("\(Int(settings.cwWPM)) WPM")
+                            .foregroundColor(.secondary)
+                    }
+                    Slider(value: $settings.cwWPM, in: 5...45, step: 1)
+                }
+            } header: {
+                Text("Speed")
+            } footer: {
+                Text("Initial speed estimate. The decoder adapts automatically to the sender's actual speed (5-60 WPM).")
+            }
+
+            Section {
+                VStack(alignment: .leading) {
+                    HStack {
+                        Text("Tone Frequency")
+                        Spacer()
+                        Text("\(Int(settings.cwToneFrequency)) Hz")
+                            .foregroundColor(.secondary)
+                    }
+                    Slider(value: $settings.cwToneFrequency, in: 400...1200, step: 50)
+                }
+            } header: {
+                Text("Frequency")
+            } footer: {
+                Text("CW sidetone frequency. 700 Hz is standard. AFC will track ±200 Hz from this setting.")
+            }
+
+            Section("Signal Parameters") {
+                HStack {
+                    Text("Modulation")
+                    Spacer()
+                    Text("OOK (On-Off Keying)")
+                        .foregroundColor(.secondary)
+                }
+                HStack {
+                    Text("Bandwidth")
+                    Spacer()
+                    Text("~\(Int(4.0 / (1.2 / settings.cwWPM))) Hz")
+                        .foregroundColor(.secondary)
+                }
+                HStack {
+                    Text("Dit Duration")
+                    Spacer()
+                    Text("\(Int(1200.0 / settings.cwWPM)) ms")
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .navigationTitle("CW Settings")
     }
 }
 

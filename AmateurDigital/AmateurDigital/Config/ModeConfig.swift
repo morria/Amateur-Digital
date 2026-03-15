@@ -23,6 +23,7 @@ enum ModeConfig {
         .qpsk31,
         .qpsk63,
         .rattlegram,
+        .cw,
     ]
 
     /// Check if a specific mode is enabled
@@ -36,6 +37,7 @@ enum ModeConfig {
         case .qpsk31: return settings.enableQPSK31
         case .qpsk63: return settings.enableQPSK63
         case .rattlegram: return settings.enableRattlegram
+        case .cw: return settings.enableCW
         default: return false
         }
     }

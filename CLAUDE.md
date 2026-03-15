@@ -4,7 +4,7 @@
 
 Amateur Digital is an iOS app for amateur radio digital modes with an iMessage-style chat interface. Uses external USB soundcard connected between iPhone and radio for audio I/O.
 
-**Supported modes**: RTTY, PSK31, BPSK63, QPSK31, QPSK63, Rattlegram (Olivia planned)
+**Supported modes**: RTTY, PSK31, BPSK63, QPSK31, QPSK63, CW, Rattlegram (Olivia planned)
 
 **Website**: https://amateurdigital.app (GitHub Pages)
 
@@ -32,6 +32,9 @@ xcodebuild -project AmateurDigital/AmateurDigital.xcodeproj \
   -scheme AmateurDigital \
   -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
   build
+
+# Run CW benchmark (96+ tests across noise, fading, speed, jitter, AFC)
+cd AmateurDigital/AmateurDigitalCore && swift run CWBenchmark
 
 # Generate RTTY test audio files
 cd AmateurDigital/AmateurDigitalCore && swift run GenerateTestAudio
@@ -79,9 +82,9 @@ cd AmateurDigital/AmateurDigitalCore && swift run GenerateTestAudio
     │   ├── Sources/
     │   │   ├── AmateurDigitalCore/    # Library
     │   │   │   ├── Models/            # Channel, Message, DigitalMode, Station, Configurations
-    │   │   │   ├── Codecs/            # BaudotCodec, VaricodeCodec
+    │   │   │   ├── Codecs/            # BaudotCodec, VaricodeCodec, MorseCodec
     │   │   │   ├── DSP/               # GoertzelFilter, SineGenerator
-    │   │   │   └── Modems/            # RTTYModem, PSKModem, FSK/PSK modulators & demodulators
+    │   │   │   └── Modems/            # RTTYModem, PSKModem, CWModem, FSK/PSK/CW modulators & demodulators
     │   │   └── GenerateTestAudio/     # CLI tool to generate test WAV files
     │   └── Tests/
     │
@@ -107,6 +110,7 @@ cd AmateurDigital/AmateurDigitalCore && swift run GenerateTestAudio
 ### Completed
 - **RTTY**: Full TX/RX with multi-channel demodulator (8 channels)
 - **PSK**: Full TX/RX for PSK31, BPSK63, QPSK31, QPSK63 with multi-channel demodulator
+- **CW**: Full TX/RX with adaptive speed tracking (5-60 WPM), AFC, QSB fading resistance, hand-sent CW tolerance
 - **Rattlegram**: OFDM burst mode library complete (RattlegramCore). Not yet integrated into iOS app — see integration guide below.
 - **Mode Selection UI**: Card-based mode picker as app entry point
 - **Website**: GitHub Pages deployment with app landing page
@@ -156,6 +160,16 @@ cd AmateurDigital/AmateurDigitalCore && swift run GenerateTestAudio
 - QPSK63: QPSK, 62.5 baud (2 bits/symbol)
 - Center frequency: 1000 Hz (default)
 - Sample rate: 48000 Hz
+
+**CW (Morse Code) Parameters**
+- Tone frequency: 700 Hz (default, configurable)
+- Speed: 5-60 WPM adaptive tracking (PARIS standard)
+- Sample rate: 48000 Hz
+- Goertzel block size: ~10ms (480 samples)
+- AFC range: ±250 Hz in 25 Hz steps
+- Rise/fall time: 5ms raised-cosine envelope
+- Dash-to-dot ratio: 3.0 (handles 2.5-4.0)
+- Benchmark score: 96.3/100 (clean=100, speed=100, noise=88, fading=97, jitter=93, AFC=98)
 
 **Baudot Codec (RTTY)**
 - `BaudotCodec.encode(String) -> [UInt8]` - Text to 5-bit codes
