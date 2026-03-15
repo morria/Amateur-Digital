@@ -10,13 +10,14 @@ final class DigitalModeTests: XCTestCase {
 
     func testAllCases() {
         let allModes = DigitalMode.allCases
-        XCTAssertEqual(allModes.count, 6)
+        XCTAssertEqual(allModes.count, 7)
         XCTAssertTrue(allModes.contains(.rtty))
         XCTAssertTrue(allModes.contains(.psk31))
         XCTAssertTrue(allModes.contains(.bpsk63))
         XCTAssertTrue(allModes.contains(.qpsk31))
         XCTAssertTrue(allModes.contains(.qpsk63))
         XCTAssertTrue(allModes.contains(.olivia))
+        XCTAssertTrue(allModes.contains(.cw))
     }
 
     func testRawValues() {
@@ -26,6 +27,7 @@ final class DigitalModeTests: XCTestCase {
         XCTAssertEqual(DigitalMode.qpsk31.rawValue, "QPSK31")
         XCTAssertEqual(DigitalMode.qpsk63.rawValue, "QPSK63")
         XCTAssertEqual(DigitalMode.olivia.rawValue, "Olivia")
+        XCTAssertEqual(DigitalMode.cw.rawValue, "CW")
     }
 
     func testDisplayNames() {
@@ -35,6 +37,7 @@ final class DigitalModeTests: XCTestCase {
         XCTAssertEqual(DigitalMode.qpsk31.displayName, "QPSK31")
         XCTAssertEqual(DigitalMode.qpsk63.displayName, "QPSK63")
         XCTAssertEqual(DigitalMode.olivia.displayName, "Olivia 8/250")
+        XCTAssertEqual(DigitalMode.cw.displayName, "CW (Morse)")
     }
 
     func testCenterFrequencies() {
@@ -44,6 +47,7 @@ final class DigitalModeTests: XCTestCase {
         XCTAssertEqual(DigitalMode.qpsk31.centerFrequency, 1000.0)
         XCTAssertEqual(DigitalMode.qpsk63.centerFrequency, 1000.0)
         XCTAssertEqual(DigitalMode.olivia.centerFrequency, 1500.0)
+        XCTAssertEqual(DigitalMode.cw.centerFrequency, 700.0)
     }
 
     func testIdentifiable() {
@@ -53,6 +57,7 @@ final class DigitalModeTests: XCTestCase {
         XCTAssertEqual(DigitalMode.qpsk31.id, "QPSK31")
         XCTAssertEqual(DigitalMode.qpsk63.id, "QPSK63")
         XCTAssertEqual(DigitalMode.olivia.id, "Olivia")
+        XCTAssertEqual(DigitalMode.cw.id, "CW")
     }
 
     func testCodable() throws {

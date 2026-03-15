@@ -213,6 +213,10 @@ class ModemService: ObservableObject {
 
     private var pskModem: PSKModem?
     private var multiChannelPSKDemodulator: MultiChannelPSKDemodulator?
+
+    // MARK: - CW Modem
+
+    private var cwModem: CWModem?
     #endif
 
     // MARK: - Rattlegram Modem
@@ -233,6 +237,12 @@ class ModemService: ObservableObject {
             #else
             return false
             #endif
+        case .cw:
+            #if canImport(AmateurDigitalCore)
+            return cwModem != nil
+            #else
+            return false
+            #endif
         default:
             #if canImport(AmateurDigitalCore)
             return rttyModem != nil
@@ -243,6 +253,15 @@ class ModemService: ObservableObject {
     }
 
     #if canImport(AmateurDigitalCore)
+    /// Create CWConfiguration from current settings
+    private var currentCWConfiguration: CWConfiguration {
+        CWConfiguration(
+            toneFrequency: settings.cwToneFrequency,
+            wpm: settings.cwWPM,
+            sampleRate: 48000.0
+        )
+    }
+
     /// Create RTTYConfiguration from current settings
     private var currentRTTYConfiguration: RTTYConfiguration {
         RTTYConfiguration(
@@ -291,6 +310,10 @@ class ModemService: ObservableObject {
         // Create PSK modem (default to PSK31)
         self.pskModem = PSKModem(configuration: currentPSKConfiguration)
         setupMultiChannelPSKDemodulator()
+
+        // Create CW modem
+        self.cwModem = CWModem(configuration: currentCWConfiguration)
+        self.cwModem?.delegate = self
         #else
         print("[ModemService] DigiModesCore not available - running in placeholder mode")
         // Setup default channel frequencies for placeholder mode
@@ -360,12 +383,18 @@ class ModemService: ObservableObject {
         multiChannelPSKDemodulator?.delegate = self
         multiChannelPSKDemodulator?.setSquelch(Float(settings.psk31Squelch))
 
+        // Rebuild CW modem with new config
+        cwModem = CWModem(configuration: currentCWConfiguration)
+        cwModem?.delegate = self
+
         // Update channel frequencies for the active mode
         switch activeMode {
         case .rtty:
             channelFrequencies = multiChannelDemodulator?.channels.map { $0.frequency } ?? []
         case .psk31, .bpsk63, .qpsk31, .qpsk63:
             channelFrequencies = multiChannelPSKDemodulator?.channels.map { $0.frequency } ?? []
+        case .cw:
+            channelFrequencies = [settings.cwToneFrequency]
         case .olivia:
             break
         case .rattlegram:
@@ -429,6 +458,12 @@ class ModemService: ObservableObject {
             multiChannelPSKDemodulator?.setSquelch(Float(settings.psk31Squelch))
             channelFrequencies = multiChannelPSKDemodulator?.channels.map { $0.frequency } ?? []
 
+        case .cw:
+            // CW mode: single-channel adaptive decoder
+            cwModem = CWModem(configuration: currentCWConfiguration)
+            cwModem?.delegate = self
+            channelFrequencies = [settings.cwToneFrequency]
+
         case .olivia:
             // Not yet implemented
             channelFrequencies = []
@@ -452,6 +487,9 @@ class ModemService: ObservableObject {
         // Reset PSK modems - setting to nil releases resources
         pskModem?.reset()
         multiChannelPSKDemodulator?.reset()
+
+        // Reset CW modem
+        cwModem?.reset()
         #endif
 
         #if canImport(RattlegramCore)
@@ -504,6 +542,11 @@ class ModemService: ObservableObject {
             }
             signalStrength = pskModem?.signalStrength ?? 0
             isDecoding = pskModem?.isSignalDetected ?? false
+
+        case .cw:
+            cwModem?.process(samples: samples)
+            signalStrength = cwModem?.signalStrength ?? 0
+            isDecoding = cwModem?.isSignalDetected ?? false
 
         case .olivia:
             // Not yet implemented
@@ -558,6 +601,14 @@ class ModemService: ObservableObject {
                 text: text,
                 preambleMs: 100,
                 postambleMs: 50
+            )
+
+        case .cw:
+            let txModem = CWModem(configuration: currentCWConfiguration)
+            samples = txModem.encodeWithEnvelope(
+                text: text,
+                preambleMs: Double(settings.txPreambleMs),
+                postambleMs: 200
             )
 
         case .olivia, .rattlegram:
@@ -620,6 +671,20 @@ class ModemService: ObservableObject {
                 postambleMs: 50
             )
 
+        case .cw:
+            let config: CWConfiguration
+            if let freq = frequency {
+                config = currentCWConfiguration.withToneFrequency(freq)
+            } else {
+                config = currentCWConfiguration
+            }
+            let txModem = CWModem(configuration: config)
+            return txModem.encodeWithEnvelope(
+                text: text,
+                preambleMs: Double(settings.txPreambleMs),
+                postambleMs: 200
+            )
+
         case .olivia, .rattlegram:
             return []
         }
@@ -642,7 +707,8 @@ class ModemService: ObservableObject {
             guard let modem = pskModem else { return nil }
             samples = modem.generateIdle(duration: duration)
 
-        case .olivia, .rattlegram:
+        case .cw, .olivia, .rattlegram:
+            // CW doesn't have a continuous idle tone
             return nil
         }
 
@@ -695,8 +761,8 @@ class ModemService: ObservableObject {
             // Generate idle carrier for PSK phase lock
             return txModem.generateIdle(duration: durationSeconds)
 
-        case .olivia, .rattlegram:
-            // Rattlegram has built-in sync, no preamble needed
+        case .cw, .olivia, .rattlegram:
+            // CW/Rattlegram have built-in sync, no preamble needed
             return nil
         }
         #else
@@ -966,6 +1032,32 @@ extension ModemService: PSKModemDelegate {
         Task { @MainActor in
             self.isDecoding = detected
             delegate?.modemService(self, signalDetected: detected, onChannel: frequency, mode: self.activeMode)
+        }
+    }
+}
+
+// MARK: - CWModemDelegate
+
+extension ModemService: CWModemDelegate {
+    nonisolated func modem(
+        _ modem: CWModem,
+        didDecode character: Character,
+        atFrequency frequency: Double
+    ) {
+        let strength = modem.signalStrength
+        Task { @MainActor in
+            delegate?.modemService(self, didDecode: character, onChannel: frequency, mode: .cw, signalStrength: strength)
+        }
+    }
+
+    nonisolated func modem(
+        _ modem: CWModem,
+        signalDetected detected: Bool,
+        atFrequency frequency: Double
+    ) {
+        Task { @MainActor in
+            self.isDecoding = detected
+            delegate?.modemService(self, signalDetected: detected, onChannel: frequency, mode: .cw)
         }
     }
 }

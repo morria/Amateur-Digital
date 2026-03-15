@@ -164,6 +164,19 @@ class SettingsManager: NSObject, ObservableObject {
         didSet { save(enableRattlegram, forKey: "enableRattlegram") }
     }
 
+    @Published var enableCW: Bool {
+        didSet { save(enableCW, forKey: "enableCW") }
+    }
+
+    // CW Settings
+    @Published var cwWPM: Double {
+        didSet { save(cwWPM, forKey: "cwWPM") }
+    }
+
+    @Published var cwToneFrequency: Double {
+        didSet { save(cwToneFrequency, forKey: "cwToneFrequency") }
+    }
+
     // RTTY Global Settings (per-channel defaults)
     @Published var rttyPolarityInverted: Bool {
         didSet { save(rttyPolarityInverted, forKey: "rttyPolarityInverted") }
@@ -229,6 +242,10 @@ class SettingsManager: NSObject, ObservableObject {
         self.enableQPSK31 = Self.initialLoadBool(forKey: "enableQPSK31", default: false)
         self.enableQPSK63 = Self.initialLoadBool(forKey: "enableQPSK63", default: false)
         self.enableRattlegram = Self.initialLoadBool(forKey: "enableRattlegram", default: false)
+        self.enableCW = Self.initialLoadBool(forKey: "enableCW", default: false)
+
+        self.cwWPM = Self.initialLoadDouble(forKey: "cwWPM", default: 20.0)
+        self.cwToneFrequency = Self.initialLoadDouble(forKey: "cwToneFrequency", default: 700.0)
 
         self.rttyPolarityInverted = Self.initialLoadBool(forKey: "rttyPolarityInverted", default: false)
         self.rttyFrequencyOffset = Self.initialLoadInt(forKey: "rttyFrequencyOffset", default: 0)
@@ -313,6 +330,9 @@ class SettingsManager: NSObject, ObservableObject {
             self.enableQPSK31 = loadBool(forKey: "enableQPSK31", default: false)
             self.enableQPSK63 = loadBool(forKey: "enableQPSK63", default: false)
             self.enableRattlegram = loadBool(forKey: "enableRattlegram", default: false)
+            self.enableCW = loadBool(forKey: "enableCW", default: false)
+            self.cwWPM = loadDouble(forKey: "cwWPM", default: 20.0)
+            self.cwToneFrequency = loadDouble(forKey: "cwToneFrequency", default: 700.0)
             self.rttyPolarityInverted = loadBool(forKey: "rttyPolarityInverted", default: false)
             self.rttyFrequencyOffset = loadInt(forKey: "rttyFrequencyOffset", default: 0)
             self.noiseFloorThreshold = loadDouble(forKey: "noiseFloorThreshold", default: -60.0)
