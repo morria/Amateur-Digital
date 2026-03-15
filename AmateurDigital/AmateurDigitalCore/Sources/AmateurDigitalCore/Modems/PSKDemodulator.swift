@@ -423,6 +423,8 @@ public final class PSKDemodulator {
             return  // Don't decode during warmup — it's preamble
         }
 
+
+
         if configuration.modulationType == .bpsk {
             decodeBPSKSymbol(currentI: currentI, currentQ: currentQ)
         } else {
