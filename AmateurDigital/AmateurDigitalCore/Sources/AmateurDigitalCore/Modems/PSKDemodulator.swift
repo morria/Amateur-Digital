@@ -47,7 +47,7 @@ public protocol PSKDemodulatorDelegate: AnyObject {
 /// 7. Differential phase detection (compare current vs previous symbol)
 ///    - BPSK: Dot product sign check for 180° detection
 ///    - QPSK: atan2 phase calculation, quantize to nearest quadrant
-/// 8. AFC (Automatic Frequency Control) via phase residual tracking
+/// 8. AFC: Two-phase carrier tracking (preamble estimation + decision-directed)
 /// 9. Varicode decoding to characters
 ///
 /// Example usage:
@@ -89,6 +89,15 @@ public final class PSKDemodulator {
     private var signalPower: Double = 0
     private var noisePower: Double = 0.001
     private var _signalDetected: Bool = false
+    private var signalPersistCount: Int = 0         // consecutive symbols above detection threshold
+    private let signalPersistRequired: Int = 4      // must sustain for this many symbols to open squelch
+
+    /// Phase quality metric (fldigi-style IMD approximation) — measures how close
+    /// symbol phases are to expected constellation points. Real BPSK signals cluster
+    /// at 0° and 180° → |cos(Δφ)| ≈ 1.0. Noise has uniform random phase → ≈ 0.637.
+    private var phaseQualityAccum: Double = 0
+    private var phaseQualityCount: Int = 0
+    private let phaseQualityThreshold: Double = 0.70  // must exceed this to acquire signal
 
     // MARK: - Bandpass Filter
 
@@ -136,27 +145,19 @@ public final class PSKDemodulator {
 
     // MARK: - AFC Properties
 
-    /// Whether AFC (Automatic Frequency Control) is enabled
-    public var afcEnabled: Bool = true
-
-    /// Current frequency correction in Hz (read-only)
-    public private(set) var frequencyCorrection: Double = 0
-
-    /// AFC phase correction per sample (precomputed from frequencyCorrection)
-    private var afcPhaseCorrection: Double = 0
-
-    /// AFC smoothing coefficient (0-1, lower = slower tracking)
-    private let afcAlpha: Double = 0.05
-
-    /// Phase residual accumulator for AFC
-    private var phaseResidualAccum: Double = 0
-    private var phaseResidualCount: Int = 0
-
-    /// AFC update interval in symbols
-    private let afcUpdateInterval: Int = 8
-
-    /// Counter for AFC update timing
-    private var afcSymbolCounter: Int = 0
+    /// AFC (Automatic Frequency Control) - carrier tracking
+    /// Two-phase approach:
+    /// 1. Preamble estimation: measures raw phase rotation during idle carrier for initial offset
+    /// 2. Decision-directed tracking: refines offset using decoded symbols
+    private var afcPhaseCorrection: Double = 0    // current correction per sample (radians)
+    private var afcIntegrator: Double = 0          // integral term of loop filter
+    private var afcSymbolCount: Int = 0            // symbols since signal detection
+    private var afcErrorAccum: Double = 0          // accumulated error for averaging
+    private var afcErrorCount: Int = 0             // number of errors accumulated
+    private var afcInitialEstimateDone: Bool = false  // has preamble estimation completed?
+    private var afcPreambleI: [Double] = []           // I samples during preamble (sub-symbol rate)
+    private var afcPreambleQ: [Double] = []           // Q samples during preamble (sub-symbol rate)
+    private var afcPreambleSampleCount: Int = 0       // sample counter within preamble
 
     // MARK: - Public Properties
 
@@ -199,6 +200,26 @@ public final class PSKDemodulator {
 
     /// Maximum timing adjustment per symbol (fraction of symbol period)
     private let maxTimingAdjustFraction: Double = 0.125
+
+    /// AFC integral gain — fraction of measured offset corrected per averaging window.
+    /// 0.5 = correct half the error each window (converges in ~3 windows).
+    private let afcIntegralGain: Double = 0.5
+
+    /// AFC integrator leak factor — prevents drift on clean channel.
+    private let afcLeakFactor: Double = 0.999
+
+    /// AFC dead zone — averaged error must exceed this to apply correction (radians).
+    /// 0.08 rad ≈ 0.4 Hz at PSK31 — prevents clean-channel noise from drifting.
+    private let afcDeadZone: Double = 0.08
+
+    /// Maximum AFC correction in Hz — prevents runaway
+    private let afcMaxCorrectionHz: Double = 60.0
+
+    /// Symbols of signal detection before AFC engages
+    private let afcWarmupSymbols: Int = 4
+
+    /// Number of symbols to average before applying an AFC correction
+    private let afcAveragingWindow: Int = 4
 
     // MARK: - Initialization
 
@@ -280,6 +301,15 @@ public final class PSKDemodulator {
             onTimeAccumQ += qFiltered
         }
 
+        // During preamble warmup, collect sub-symbol IQ at quarter-symbol intervals
+        // This gives 4× the sampling rate for frequency estimation (Nyquist ~62 Hz at PSK31)
+        afcPreambleSampleCount += 1
+        if !afcInitialEstimateDone && _signalDetected && afcPreambleSampleCount >= quarterSymbol {
+            afcPreambleSampleCount = 0
+            afcPreambleI.append(iFiltered)
+            afcPreambleQ.append(qFiltered)
+        }
+
         // Check if we've completed a symbol (with timing adjustment)
         let targetLength = samplesPerSymbol + symbolTimingAdjust
         if symbolSamples >= targetLength {
@@ -293,22 +323,31 @@ public final class PSKDemodulator {
     // MARK: - AGC
 
     /// Apply AGC to normalize signal level
+    /// Only adjusts gain when a signal is detected — prevents amplifying noise
+    /// to signal levels which would cause false detection.
     /// - Parameter sample: Input sample
     /// - Returns: Gain-adjusted sample
     private func applyAGC(_ sample: Float) -> Float {
         let output = sample * agcGain
         let level = abs(output)
 
-        if level > agcTarget {
-            // Fast attack - reduce gain quickly for strong signals
-            agcGain *= (1.0 - agcAttack)
+        // Only run AGC gain adjustment when signal is detected
+        // Otherwise, leave gain at 1.0 to avoid amplifying noise
+        if _signalDetected {
+            if level > agcTarget {
+                agcGain *= (1.0 - agcAttack)
+            } else {
+                agcGain *= (1.0 + agcDecay)
+            }
+            agcGain = max(agcMinGain, min(agcMaxGain, agcGain))
         } else {
-            // Slow decay - increase gain slowly for weak signals
-            agcGain *= (1.0 + agcDecay)
+            // Slowly return gain to 1.0 when no signal (ready for next signal)
+            if agcGain > 1.0 {
+                agcGain *= (1.0 - agcDecay * 10)
+            } else if agcGain < 1.0 {
+                agcGain *= (1.0 + agcDecay * 10)
+            }
         }
-
-        // Clamp gain to reasonable range
-        agcGain = max(agcMinGain, min(agcMaxGain, agcGain))
 
         return output
     }
@@ -357,16 +396,30 @@ public final class PSKDemodulator {
         updateNoiseFloor(symbolMag)
         updateSignalDetection(symbolPower: symbolPower)
 
-        // AFC: accumulate phase residual when signal is detected
-        if afcEnabled && _signalDetected {
-            accumulateAFCResidual(currentI: currentI, currentQ: currentQ)
-        }
-
         // Only decode if signal is detected and above squelch
         guard _signalDetected && signalStrength >= effectiveSquelchLevel else {
             prevI = currentI
             prevQ = currentQ
+            afcSymbolCount = 0  // Reset warmup counter when signal lost
+            afcInitialEstimateDone = false
+            afcPreambleI.removeAll()
+            afcPreambleQ.removeAll()
+            afcPreambleSampleCount = 0
             return
+        }
+
+        afcSymbolCount += 1
+
+        // Phase 1: Preamble frequency estimation (during warmup)
+        // Sub-symbol IQ samples are collected in processSample at quarter-symbol rate
+        if afcSymbolCount <= afcWarmupSymbols {
+            // At end of warmup, estimate frequency offset from sub-symbol IQ progression
+            if afcSymbolCount == afcWarmupSymbols && afcPreambleI.count >= 4 {
+                estimateInitialFrequencyOffset()
+            }
+            prevI = currentI
+            prevQ = currentQ
+            return  // Don't decode during warmup — it's preamble
         }
 
         if configuration.modulationType == .bpsk {
@@ -382,63 +435,88 @@ public final class PSKDemodulator {
 
     // MARK: - AFC
 
-    /// Accumulate phase residual for AFC frequency correction
-    private func accumulateAFCResidual(currentI: Double, currentQ: Double) {
-        // Only compute residual if we have a valid previous symbol
-        guard prevI != 0 || prevQ != 0 else { return }
+    /// Estimate frequency offset from preamble IQ measurements.
+    /// Uses sub-symbol (quarter-symbol) IQ samples for extended frequency range.
+    /// Nyquist limit ≈ 2× baud rate (vs 0.5× with per-symbol measurement).
+    private func estimateInitialFrequencyOffset() {
+        guard afcPreambleI.count >= 4 else { return }
 
-        let currentPhase = atan2(currentQ, currentI)
-        let prevPhase = atan2(prevQ, prevI)
-
-        var phaseDiff = currentPhase - prevPhase
-        // Normalize to [-π, π]
-        while phaseDiff > .pi { phaseDiff -= 2 * .pi }
-        while phaseDiff < -.pi { phaseDiff += 2 * .pi }
-
-        // Remove data modulation to get residual frequency error
-        let residual: Double
-        if configuration.modulationType == .bpsk {
-            // BPSK: expected phase changes are 0 or π
-            if abs(phaseDiff) < .pi / 2 {
-                residual = phaseDiff  // Data was 0 (no phase change)
-            } else {
-                residual = phaseDiff > 0 ? phaseDiff - .pi : phaseDiff + .pi
-            }
-        } else {
-            // QPSK: expected phase changes are multiples of π/2
-            let quadrant = (phaseDiff / (.pi / 2)).rounded()
-            residual = phaseDiff - quadrant * (.pi / 2)
+        // Compute phase at each sub-symbol sample point
+        var phases: [Double] = []
+        for i in 0..<afcPreambleI.count {
+            phases.append(atan2(afcPreambleQ[i], afcPreambleI[i]))
         }
 
-        phaseResidualAccum += residual
-        phaseResidualCount += 1
-
-        afcSymbolCounter += 1
-        if afcSymbolCounter >= afcUpdateInterval {
-            applyAFCCorrection()
-            afcSymbolCounter = 0
+        // Compute phase diffs between consecutive quarter-symbol measurements
+        var subSymbolDiffs: [Double] = []
+        for i in 1..<phases.count {
+            var diff = phases[i] - phases[i - 1]
+            while diff > .pi { diff -= 2 * .pi }
+            while diff < -.pi { diff += 2 * .pi }
+            subSymbolDiffs.append(diff)
         }
+
+        // Skip first 2 diffs (filter transient) and use median for robustness
+        let skipCount = min(2, subSymbolDiffs.count / 3)
+        let trimmed = Array(subSymbolDiffs.dropFirst(skipCount))
+        guard !trimmed.isEmpty else {
+            afcPreambleI.removeAll()
+            afcPreambleQ.removeAll()
+            return
+        }
+        let sorted = trimmed.sorted()
+        let medianDiff = sorted[sorted.count / 2]
+
+        // medianDiff is phase change per quarter-symbol interval
+        // Convert to per-sample correction
+        let samplesPerInterval = Double(configuration.samplesPerSymbol) / 4.0
+        let correctionPerSample = medianDiff / samplesPerInterval
+
+        // Apply if significant
+        let deadZonePerSample = afcDeadZone / Double(configuration.samplesPerSymbol)
+        if abs(correctionPerSample) > deadZonePerSample {
+            afcIntegrator = correctionPerSample
+            afcPhaseCorrection = afcIntegrator
+            afcInitialEstimateDone = true
+        }
+
+        afcPreambleI.removeAll()
+        afcPreambleQ.removeAll()
     }
 
-    /// Apply accumulated AFC correction to the local oscillator
-    private func applyAFCCorrection() {
-        guard phaseResidualCount > 0 else { return }
+    /// Decision-directed AFC update using averaged phase error with leaky integrator
+    private func updateAFC(phaseError: Double) {
+        // Don't engage AFC during warmup (filter settling period)
+        guard afcSymbolCount > afcWarmupSymbols else { return }
 
-        let avgResidual = phaseResidualAccum / Double(phaseResidualCount)
+        // Ignore suspiciously large phase errors (likely bit errors or noise spikes)
+        guard abs(phaseError) < .pi / 2 else { return }
 
-        // Convert phase residual per symbol to frequency error in Hz
-        // freqError = avgResidual × baudRate / (2π)
-        let freqError = avgResidual * configuration.baudRate / (2 * .pi)
+        // Accumulate phase errors over a window for averaging
+        afcErrorAccum += phaseError
+        afcErrorCount += 1
 
-        // Smooth the correction
-        frequencyCorrection = frequencyCorrection * (1 - afcAlpha) + freqError * afcAlpha
+        // Only apply correction after averaging over a full window
+        guard afcErrorCount >= afcAveragingWindow else { return }
 
-        // Update phase correction per sample
-        afcPhaseCorrection = 2.0 * .pi * frequencyCorrection / configuration.sampleRate
+        let avgError = afcErrorAccum / Double(afcErrorCount)
+        afcErrorAccum = 0
+        afcErrorCount = 0
 
-        // Reset accumulator
-        phaseResidualAccum = 0
-        phaseResidualCount = 0
+        // Dead zone: averaged error must be significant (consistent bias = real offset)
+        guard abs(avgError) > afcDeadZone else { return }
+
+        // Leaky integrator: slowly decays toward zero when no consistent error
+        // avgError is in radians/symbol; divide by samplesPerSymbol to get radians/sample
+        let correctionPerSample = avgError / Double(configuration.samplesPerSymbol)
+        afcIntegrator = afcIntegrator * afcLeakFactor + afcIntegralGain * correctionPerSample
+
+        // Clamp integrator to prevent windup
+        let maxIntegral = 2.0 * .pi * afcMaxCorrectionHz / configuration.sampleRate
+        afcIntegrator = max(-maxIntegral, min(maxIntegral, afcIntegrator))
+
+        // Total correction in radians per sample
+        afcPhaseCorrection = afcIntegrator
     }
 
     // MARK: - BPSK/QPSK Decode
@@ -452,6 +530,23 @@ public final class PSKDemodulator {
 
         // Decode bit (phase reversal = 1, same phase = 0)
         let bit = dotProduct < 0
+
+        // AFC: Decision-directed frequency error estimation
+        // After removing the data modulation, the residual phase rotation
+        // between symbols is due to frequency offset.
+        // De-rotate: if bit=1, negate current symbol to undo 180° shift
+        let derotI = bit ? -currentI : currentI
+        let derotQ = bit ? -currentQ : currentQ
+        let freqCross = prevI * derotQ - prevQ * derotI
+        let freqDot = prevI * derotI + prevQ * derotQ
+        let phaseError = atan2(freqCross, freqDot)
+        updateAFC(phaseError: phaseError)
+
+        // Phase quality: |cos(residual_phase)| after AFC correction
+        // Real signals cluster near 0 residual → cos ≈ 1.0
+        // Noise has random residual → average cos ≈ 0.637
+        phaseQualityAccum += abs(cos(phaseError))
+        phaseQualityCount += 1
 
         // Feed bit to Varicode decoder
         if let char = varicodeCodec.decode(bit: bit) {
@@ -484,6 +579,15 @@ public final class PSKDemodulator {
         // Decision boundaries at π/4, 3π/4, 5π/4, 7π/4
         let (b1, b0) = phaseToDibit(phaseDiff)
 
+        // AFC: Decision-directed frequency error for QPSK
+        // Remove the decided phase shift to get residual frequency error
+        let decidedShift = dibitToPhaseShift(b1, b0)
+        var phaseError = phaseDiff - decidedShift
+        // Normalize to [-π, π)
+        while phaseError > .pi { phaseError -= 2 * .pi }
+        while phaseError < -.pi { phaseError += 2 * .pi }
+        updateAFC(phaseError: phaseError)
+
         // Feed both bits to Varicode decoder
         if let char1 = varicodeCodec.decode(bit: b1) {
             delegate?.demodulator(
@@ -498,6 +602,16 @@ public final class PSKDemodulator {
                 didDecode: char2,
                 atFrequency: centerFrequency
             )
+        }
+    }
+
+    /// Convert dibit to phase shift (for AFC error calculation)
+    private func dibitToPhaseShift(_ b1: Bool, _ b0: Bool) -> Double {
+        switch (b1, b0) {
+        case (false, false): return 0
+        case (false, true):  return .pi / 2
+        case (true, true):   return .pi
+        case (true, false):  return 3 * .pi / 2
         }
     }
 
@@ -531,9 +645,12 @@ public final class PSKDemodulator {
     }
 
     /// Update signal detection state
+    ///
+    /// Uses SNR-based detection with hysteresis and persistence.
+    /// A signal must sustain above the detection threshold for multiple
+    /// consecutive symbols before the squelch opens. This prevents
+    /// random noise spikes from triggering false decodes.
     private func updateSignalDetection(symbolPower: Double) {
-        // IIR filter output is already per-sample scale; no normalization needed
-
         // Track signal power (fast attack, slow decay)
         if symbolPower > signalPower {
             signalPower = signalPower * 0.8 + symbolPower * 0.2
@@ -541,20 +658,54 @@ public final class PSKDemodulator {
             signalPower = signalPower * 0.95 + symbolPower * 0.05
         }
 
-        // Track noise floor (slow adaptation, only updates when no signal)
+        // Track noise floor
+        // When no signal detected: track aggressively so noise can't create false SNR
+        // When signal detected: track very slowly, only updating if power drops below floor
         if !_signalDetected {
-            noisePower = noisePower * 0.99 + symbolPower * 0.01
+            // Moderate tracking during noise — keeps noisePower near signalPower
+            noisePower = noisePower * 0.98 + symbolPower * 0.02
         } else if symbolPower < noisePower {
             noisePower = noisePower * 0.99 + symbolPower * 0.01
         }
 
         // SNR-based detection with hysteresis
         let snr = noisePower > 0 ? signalPower / noisePower : 0
-        let detectThreshold: Double = _signalDetected ? 2.0 : 4.0  // Hysteresis
-        let newDetected = snr > detectThreshold
+        let acquireThreshold: Double = 8.0   // SNR to initially detect a signal (~9 dB)
+        let sustainThreshold: Double = 3.0   // SNR to sustain detection (hysteresis)
+        let instantThreshold = _signalDetected ? sustainThreshold : acquireThreshold
+
+        if snr > instantThreshold {
+            signalPersistCount += 1
+        } else {
+            signalPersistCount = 0
+        }
+
+        // Require persistence to acquire, drop if below sustain OR phase quality degrades
+        let newDetected: Bool
+        if _signalDetected {
+            // Once detected, check phase quality periodically to drop false detections
+            // Phase quality is only available after decode starts (BPSK/QPSK compute it)
+            let phaseQuality = phaseQualityCount >= 8
+                ? phaseQualityAccum / Double(phaseQualityCount) : 1.0
+            let qualityOK = phaseQuality > phaseQualityThreshold
+            newDetected = snr > sustainThreshold && qualityOK
+
+            // Reset phase quality accumulator periodically for fresh measurements
+            if phaseQualityCount >= 16 {
+                phaseQualityAccum = 0
+                phaseQualityCount = 0
+            }
+        } else {
+            newDetected = signalPersistCount >= signalPersistRequired
+        }
 
         if newDetected != _signalDetected {
             _signalDetected = newDetected
+            if !newDetected {
+                signalPersistCount = 0
+                phaseQualityAccum = 0
+                phaseQualityCount = 0
+            }
             delegate?.demodulator(
                 self,
                 signalDetected: newDetected,
@@ -581,15 +732,22 @@ public final class PSKDemodulator {
         signalPower = 0
         noisePower = 0.001
         _signalDetected = false
+        signalPersistCount = 0
+        phaseQualityAccum = 0
+        phaseQualityCount = 0
+        afcPhaseCorrection = 0
+        afcIntegrator = 0
+        afcSymbolCount = 0
+        afcErrorAccum = 0
+        afcErrorCount = 0
+        afcInitialEstimateDone = false
+        afcPreambleI.removeAll()
+        afcPreambleQ.removeAll()
+        afcPreambleSampleCount = 0
         varicodeCodec.reset()
         bandpassFilter.reset()
         agcGain = 1.0
         noiseFloor = 0.1
-        frequencyCorrection = 0
-        afcPhaseCorrection = 0
-        phaseResidualAccum = 0
-        phaseResidualCount = 0
-        afcSymbolCounter = 0
     }
 
     /// Tune to a different center frequency

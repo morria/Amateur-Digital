@@ -22,6 +22,10 @@ let package = Package(
             name: "DecodeWAV",
             targets: ["DecodeWAV"]
         ),
+        .executable(
+            name: "PSKBenchmark",
+            targets: ["PSKBenchmark"]
+        ),
     ],
     targets: [
         .target(
@@ -38,6 +42,11 @@ let package = Package(
             name: "DecodeWAV",
             dependencies: ["AmateurDigitalCore"],
             path: "Sources/DecodeWAV"
+        ),
+        .executableTarget(
+            name: "PSKBenchmark",
+            dependencies: ["AmateurDigitalCore"],
+            path: "Sources/PSKBenchmark"
         ),
         .testTarget(
             name: "AmateurDigitalCoreTests",
