@@ -436,6 +436,19 @@ class ChatViewModel: ObservableObject {
             print("[ChatViewModel] Encoded \(text.count) chars at \(frequency) Hz -> \(combinedSamples.count) samples")
         }
 
+        // For JS8Call, wait until the next UTC period boundary before transmitting.
+        // Other stations expect signals aligned to 15s/10s/6s/30s boundaries.
+        if selectedMode == .js8call {
+            let periodMs = modemService.js8callPeriodMs
+            let msOfDay = Int(Date().timeIntervalSince1970 * 1000) % (86400 * 1000)
+            let msIntoPeriod = msOfDay % periodMs
+            let msUntilNext = periodMs - msIntoPeriod
+            if msUntilNext > 100 && msUntilNext < periodMs {
+                print("[ChatViewModel] JS8Call: waiting \(msUntilNext)ms for next period boundary")
+                try await Task.sleep(nanoseconds: UInt64(msUntilNext) * 1_000_000)
+            }
+        }
+
         // Apply output gain from settings and play
         audioService.outputGain = Float(SettingsManager.shared.outputGain)
         try await audioService.playSamples(combinedSamples)

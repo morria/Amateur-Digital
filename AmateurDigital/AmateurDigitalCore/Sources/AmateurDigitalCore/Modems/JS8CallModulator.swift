@@ -106,28 +106,11 @@ public struct JS8CallModulator {
         return generateAudio(tones: tones)
     }
 
-    /// Compute how many samples of silence to prepend so the transmission
-    /// starts at the correct UTC-aligned position within the period.
-    /// Matches the JS8Call Modulator.cpp timing logic.
-    public func utcAlignmentSilenceSamples() -> Int {
-        let sr = currentConfiguration.sampleRate
-        let periodMs = currentConfiguration.submode.period * 1000
-        let startDelayMs = Int(currentConfiguration.submode.startDelay * 1000)
-        let msOfDay = Int(Date().timeIntervalSince1970 * 1000) % (86400 * 1000)
-        let periodOffset = msOfDay % periodMs  // ms into current period
-
-        if startDelayMs > periodOffset {
-            // Haven't reached start delay yet - pad with silence
-            return (startDelayMs - periodOffset) * Int(sr) / 1000
-        } else {
-            // Past the start delay - we're late, no padding needed
-            return 0
-        }
-    }
-
-    /// Encode with UTC-aligned leading silence and trailing silence.
-    /// The silence before the signal is computed so audio starts at
-    /// (period_boundary + startDelay), matching other JS8Call stations.
+    /// Encode with startDelay silence and trailing silence.
+    /// The caller (ChatViewModel) is responsible for waiting until the
+    /// next UTC period boundary before playing the returned audio.
+    /// The startDelay silence (e.g., 500ms for Normal) positions the
+    /// 8-FSK waveform at the correct offset within the period.
     public mutating func modulateTextWithEnvelope(
         _ text: String,
         frameType: Int = 0,
@@ -137,10 +120,8 @@ public struct JS8CallModulator {
         let sr = currentConfiguration.sampleRate
         let startDelay = currentConfiguration.submode.startDelay
 
-        // UTC-aligned silence: position audio at startDelay within the period
-        let utcSilence = utcAlignmentSilenceSamples()
-        let extraPreamble = Int(preambleMs / 1000.0 * sr)
-        let preSamples = utcSilence + extraPreamble + Int(startDelay * sr)
+        // startDelay positions the signal within the period (e.g., 500ms for Normal)
+        let preSamples = Int((startDelay + preambleMs / 1000.0) * sr)
         let postSamples = Int(postambleMs / 1000.0 * sr)
 
         var samples = [Float](repeating: 0, count: preSamples)

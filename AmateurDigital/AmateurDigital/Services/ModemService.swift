@@ -229,6 +229,15 @@ class ModemService: ObservableObject {
     private var rattlegramProcessor: RattlegramProcessor?
     #endif
 
+    /// JS8Call period in milliseconds (for UTC-aligned TX timing)
+    var js8callPeriodMs: Int {
+        #if canImport(AmateurDigitalCore)
+        return (js8callModem?.currentConfiguration.submode.period ?? 15) * 1000
+        #else
+        return 15000
+        #endif
+    }
+
     /// Audio format for processing (48kHz mono Float32)
     private let processingFormat: AVAudioFormat?
 
