@@ -148,7 +148,7 @@ public final class Decoder {
     private func demodOrErase(_ curr: cmplx, _ prev: cmplx) -> cmplx {
         if norm(prev) <= 0 { return cmplx() }
         let cons = curr / prev
-        if norm(cons) > 4 { return cmplx() }
+        if norm(cons) > 9 { return cmplx() }
         return cons
     }
 
@@ -352,20 +352,23 @@ public final class Decoder {
     }
 
     private func compensate() {
-        var count = 0
-        for i in 0..<Self.payCarCnt {
-            let con = cons[i]
-            if con.real != 0 && con.imag != 0 {
-                let h = QPSK.hard(con)
-                let mapped = QPSK.map(h.0, h.1)
-                indexBuf[count] = Float(i + Self.payCarOff)
-                phaseBuf[count] = arg(con * conj(mapped))
-                count += 1
+        // Two iterations of Theil-Sen phase compensation for better convergence
+        for _ in 0..<2 {
+            var count = 0
+            for i in 0..<Self.payCarCnt {
+                let con = cons[i]
+                if con.real != 0 && con.imag != 0 {
+                    let h = QPSK.hard(con)
+                    let mapped = QPSK.map(h.0, h.1)
+                    indexBuf[count] = Float(i + Self.payCarOff)
+                    phaseBuf[count] = arg(con * conj(mapped))
+                    count += 1
+                }
             }
-        }
-        tse.compute(indexBuf, phaseBuf, count)
-        for i in 0..<Self.payCarCnt {
-            cons[i] *= RattlegramCore.polar(1 as Float, -tse.evaluate(Float(i + Self.payCarOff)))
+            tse.compute(indexBuf, phaseBuf, count)
+            for i in 0..<Self.payCarCnt {
+                cons[i] *= RattlegramCore.polar(1 as Float, -tse.evaluate(Float(i + Self.payCarOff)))
+            }
         }
     }
 
@@ -373,20 +376,43 @@ public final class Decoder {
         var sp: Float = 0
         var np: Float = 0
         for i in 0..<Self.payCarCnt {
+            if cons[i].real == 0 && cons[i].imag == 0 { continue }
             let h = QPSK.hard(cons[i])
             let hard = QPSK.map(h.0, h.1)
             let error = cons[i] - hard
             sp += norm(hard)
             np += norm(error)
         }
-        return np > 0 ? sp / np : 1
+        let raw = np > 0 ? sp / np : 1
+        return max(raw, 0.5)
     }
 
     private func demap() {
-        let pre = precision()
+        let globalPre = precision()
+
+        // Compute average reference carrier power for per-carrier weighting
+        var avgRefPower: Float = 0
+        var refCount = 0
+        for i in 0..<Self.payCarCnt {
+            let p = norm(prev[i])
+            if p > 0 {
+                avgRefPower += p
+                refCount += 1
+            }
+        }
+        avgRefPower = refCount > 0 ? avgRefPower / Float(refCount) : 1
+
         for i in 0..<Self.payCarCnt {
             let offset = Self.modBits * (symbolNumber * Self.payCarCnt + i)
-            QPSK.soft(&code, offset: offset, cons[i], precision: pre)
+            if cons[i].real == 0 && cons[i].imag == 0 {
+                code[offset] = 0
+                code[offset + 1] = 0
+                continue
+            }
+            // Weight precision by reference carrier power (fading resilience)
+            let refPower = norm(prev[i])
+            let weight = min(Foundation.sqrt(refPower / max(avgRefPower, 1e-10)), 2.0)
+            QPSK.soft(&code, offset: offset, cons[i], precision: globalPre * weight)
         }
     }
 }

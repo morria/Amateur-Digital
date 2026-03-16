@@ -43,3 +43,9 @@ todo.md
 HamTextClassifierTraining/.venv/
 HamTextClassifierTraining/data/
 HamTextClassifierTraining/*.mlmodel
+HamTextClassifierTraining/__pycache__/
+
+research/FT4_FT8_QEX.pdf
+research/WSJT-X/
+research/fldigi/
+research/js8call/

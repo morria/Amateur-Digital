@@ -1,380 +1,291 @@
-# Amateur Digital - Claude Development Notes
+# Amateur Digital
 
-## Project Overview
+iOS app for amateur radio digital modes with an iMessage-style chat interface. External USB soundcard connects between iPhone and radio for audio I/O.
 
-Amateur Digital is an iOS app for amateur radio digital modes with an iMessage-style chat interface. Uses external USB soundcard connected between iPhone and radio for audio I/O.
-
-**Supported modes**: RTTY, PSK31, BPSK63, QPSK31, QPSK63, CW, Rattlegram (Olivia planned)
-
+**Supported modes**: RTTY, PSK31, BPSK63, QPSK31, QPSK63, CW, JS8Call, Rattlegram (Olivia planned)
 **Website**: https://amateurdigital.app (GitHub Pages)
 
-## Build Commands
+## Build & Test Commands
 
 ```bash
-# Build Swift Package (AmateurDigitalCore)
+# AmateurDigitalCore — RTTY, PSK, CW, JS8Call modems
 cd AmateurDigital/AmateurDigitalCore && swift build
+cd AmateurDigital/AmateurDigitalCore && swift test     # 16 test files
 
-# Run AmateurDigitalCore tests
-cd AmateurDigital/AmateurDigitalCore && swift test
-
-# Build RattlegramCore
+# RattlegramCore — OFDM burst modem
 cd AmateurDigital/RattlegramCore && swift build
+cd AmateurDigital/RattlegramCore && swift test          # 14 test files, 68 tests
 
-# Run RattlegramCore tests (68 tests, all passing)
-cd AmateurDigital/RattlegramCore && swift test
-
-# Rattlegram CLI tool
-cd AmateurDigital/RattlegramCore && swift run RattlegramCLI encode --text "HELLO" --callsign TEST --output /tmp/test.wav
-cd AmateurDigital/RattlegramCore && swift run RattlegramCLI decode --input /tmp/test.wav
-
-# Build iOS app (requires Xcode)
+# iOS app (requires Xcode + signing)
 xcodebuild -project AmateurDigital/AmateurDigital.xcodeproj \
   -scheme AmateurDigital \
   -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
   build
+```
 
-# Run CW benchmark (96+ tests across noise, fading, speed, jitter, AFC)
+## CLI Tools & Benchmarks
+
+```bash
+# CW benchmark — 96+ tests across noise, fading, speed, jitter, AFC
 cd AmateurDigital/AmateurDigitalCore && swift run CWBenchmark
 
-# Generate RTTY test audio files
+# PSK benchmark — 69 tests across BPSK63, QPSK31, QPSK63
+cd AmateurDigital/AmateurDigitalCore && swift run PSKBenchmark
+
+# JS8Call benchmark
+cd AmateurDigital/AmateurDigitalCore && swift run JS8Benchmark
+
+# Decode any WAV file (auto-detects mode, parallel demodulation)
+cd AmateurDigital/AmateurDigitalCore && swift run DecodeWAV <input.wav>
+
+# Generate RTTY test audio → /tmp/rtty_single_channel.wav, /tmp/rtty_multi_channel.wav
 cd AmateurDigital/AmateurDigitalCore && swift run GenerateTestAudio
-# Outputs: /tmp/rtty_single_channel.wav, /tmp/rtty_multi_channel.wav
+
+# Rattlegram CLI — encode/decode WAV files
+cd AmateurDigital/RattlegramCore && swift run RattlegramCLI encode --text "HELLO" --callsign TEST --output /tmp/test.wav
+cd AmateurDigital/RattlegramCore && swift run RattlegramCLI decode --input /tmp/test.wav
+
+# Rattlegram benchmark
+cd AmateurDigital/RattlegramCore && swift run RattlegramBenchmark
 ```
 
 ## Architecture
 
-### Three Codebases
-1. **AmateurDigital/** - iOS app (SwiftUI, requires Xcode)
-2. **AmateurDigitalCore/** - Swift Package with RTTY/PSK modems (buildable via CLI)
-3. **RattlegramCore/** - Swift Package with OFDM modem for rattlegram mode (buildable via CLI)
+### Three Swift Packages + iOS App
+
+| Codebase | What | Buildable via CLI |
+|----------|------|:-:|
+| `AmateurDigital/AmateurDigital/` | iOS app (SwiftUI, 26 files) | No (Xcode) |
+| `AmateurDigital/AmateurDigitalCore/` | RTTY/PSK/CW/JS8Call modems | Yes |
+| `AmateurDigital/RattlegramCore/` | OFDM modem (Rattlegram) | Yes |
+| `HamTextClassifierTraining/` | CoreML model — detects ham radio text | Python |
+| `CallsignExtractorTraining/` | CoreML model — extracts callsigns | Python |
 
 ### Key Design Decisions
-- iOS 17+ target (uses `ObservableObject`, not `@Observable`)
+- iOS 17+ target, uses `ObservableObject` (not `@Observable`)
 - Messages-style two-level navigation: Channel List → Channel Detail
-- Ham radio conventions: uppercase text, callsigns, RST reports
 - Channel = detected signal on a frequency, may have multiple participants
-- Settings persist via iCloud Key-Value Store (NSUbiquitousKeyValueStore)
+- Settings persist via iCloud Key-Value Store (NSUbiquitousKeyValueStore), falls back to UserDefaults
+- Ham radio conventions: uppercase text, callsigns, RST reports
 
 ### File Organization
 
 ```
 .
-├── website/                           # GitHub Pages website
-│   ├── index.html
-│   └── app-icon.png
+├── CLAUDE.md
+├── README.md
+├── AppStoreMetadata.md
+├── todo.md
+├── website/                           # GitHub Pages site
 ├── .github/workflows/
-│   └── deploy-pages.yml               # GitHub Pages deployment
+│   ├── deploy-pages.yml               # Deploys website/ to GitHub Pages
+│   └── test.yml                       # Runs AmateurDigitalCore tests (macOS 14, Xcode 15.4)
+├── scripts/                           # Python analysis tools for RTTY/PSK signal processing
+├── samples/                           # Test WAV files (~40 MB): RTTY and PSK at varying SNR
+├── research/                          # Reference source code (~650 MB)
+│   ├── fldigi/                        # Full fldigi source
+│   ├── js8call/                       # Full JS8Call source
+│   └── WSJT-X/                        # Full WSJT-X source (FT4/FT8 reference)
+├── .reference/
+│   ├── rattlegram/                    # C++ original (44 header-only files, Swift port basis)
+│   └── fldigi-research.md             # Signal processing comparison & improvement roadmap
+├── docs/presentation/                 # HTML reveal.js presentation on digital modes
+│
+├── HamTextClassifierTraining/         # ML: logistic regression on text statistics
+│   ├── train_model.py
+│   └── HamTextClassifier.mlmodel
+├── CallsignExtractorTraining/         # ML: callsign extraction from decoded text
+│   ├── train_model.py
+│   └── CallsignModel.mlmodel
 │
 └── AmateurDigital/
-    ├── AmateurDigital/                # iOS App
+    ├── AmateurDigital.xcodeproj
+    ├── AmateurDigital/                # iOS App (26 Swift files)
+    │   ├── AmateurDigitalApp.swift    # Entry point
     │   ├── Models/                    # Channel, Message, DigitalMode, Station
     │   ├── Views/
-    │   │   ├── ModeSelectionView.swift # Entry point - mode selection cards
-    │   │   ├── Channels/              # ChannelListView, ChannelDetailView, ChannelRowView
-    │   │   ├── Chat/                  # ChatView, MessageBubbleView, MessageInputView
+    │   │   ├── ContentView.swift, AdaptiveContentView.swift
+    │   │   ├── PhoneNavigationView.swift, iPadNavigationView.swift
+    │   │   ├── ModeSelectionView.swift # Card-based mode picker
+    │   │   ├── Channels/              # ChannelListView, ChannelDetailView, ChannelRowView, ModeSidebarView
+    │   │   ├── Chat/                  # ChatView, MessageBubbleView, MessageInputView, MessageListView
     │   │   ├── Components/            # ModePickerView
-    │   │   └── Settings/              # SettingsView with AudioMeterView
+    │   │   └── Settings/              # SettingsView
     │   ├── ViewModels/                # ChatViewModel
     │   ├── Services/                  # AudioService, ModemService, SettingsManager
-    │   └── Config/                    # ModeConfig (enable/disable modes)
+    │   ├── Config/                    # ModeConfig (enable/disable modes)
+    │   ├── Utilities/                 # Constants
+    │   └── Resources/                 # Localizable.xcstrings, PrivacyInfo.xcprivacy
     │
-    ├── AmateurDigitalCore/            # Swift Package (RTTY/PSK)
+    ├── AmateurDigitalCore/            # Swift Package — HF digital modems
+    │   ├── Package.swift              # iOS 16+ / macOS 13+
     │   ├── Sources/
     │   │   ├── AmateurDigitalCore/    # Library
     │   │   │   ├── Models/            # Channel, Message, DigitalMode, Station, Configurations
-    │   │   │   ├── Codecs/            # BaudotCodec, VaricodeCodec, MorseCodec
-    │   │   │   ├── DSP/               # GoertzelFilter, SineGenerator
-    │   │   │   └── Modems/            # RTTYModem, PSKModem, CWModem, FSK/PSK/CW modulators & demodulators
-    │   │   └── GenerateTestAudio/     # CLI tool to generate test WAV files
-    │   └── Tests/
+    │   │   │   ├── Codecs/            # BaudotCodec, VaricodeCodec, MorseCodec, JS8CallCodec, LDPC174_87
+    │   │   │   ├── DSP/               # GoertzelFilter, SineGenerator, BandpassFilter, FFTProcessor, NuttallWindow
+    │   │   │   └── Modems/            # RTTYModem, PSKModem, CWModem, JS8CallModem + modulators/demodulators
+    │   │   ├── GenerateTestAudio/     # CLI: generate test WAV files
+    │   │   ├── DecodeWAV/             # CLI: decode any WAV file
+    │   │   ├── CWBenchmark/           # CLI: CW decoder benchmark
+    │   │   ├── PSKBenchmark/          # CLI: PSK decoder benchmark
+    │   │   └── JS8Benchmark/          # CLI: JS8Call decoder benchmark
+    │   ├── Tests/                     # 16 test files
+    │   └── PSK_RND_NOTES.md           # PSK R&D log: AFC, score history, optimization notes
     │
-    └── RattlegramCore/                # Swift Package (OFDM/Rattlegram)
+    └── RattlegramCore/                # Swift Package — OFDM burst modem
         ├── Package.swift              # iOS 16+ / macOS 13+
         ├── Sources/
         │   ├── RattlegramCore/        # Library (33 Swift files)
-        │   │   ├── Math/              # Complex numbers, constants, utilities
-        │   │   ├── DSP/               # FFT, Hilbert, BlockDC, Phasor, BipBuffer, SMA, PAPR
-        │   │   ├── Coding/            # CRC, MLS, Xorshift, BitManipulation, PSK, Base37
-        │   │   ├── Polar/             # Polar encoder/decoder, list decoder, frozen bit tables
-        │   │   ├── BCH/               # BCH encoder, OSD decoder, generator matrix
-        │   │   ├── Sync/              # SchmidlCox correlator, TheilSen estimator, triggers
         │   │   ├── Encoder.swift      # OFDM encoder: text → Int16 audio samples
-        │   │   └── Decoder.swift      # OFDM decoder: Int16 audio samples → text
-        │   └── RattlegramCLI/         # CLI tool: encode/decode WAV files
-        │       └── main.swift
-        └── Tests/                     # 68 tests (all passing)
+        │   │   ├── Decoder.swift      # OFDM decoder: Int16 audio samples → text
+        │   │   ├── Math/              # Complex numbers, constants, utilities
+        │   │   ├── DSP/               # FFT, Hilbert, BlockDC, Phasor, BipBuffer, SMA, PAPR, Delay, Window
+        │   │   ├── Coding/            # CRC, MLS, Xorshift, BitManipulation, PSK, Base37
+        │   │   ├── Polar/             # Polar encoder/decoder, list decoder, frozen bit tables, SIMD
+        │   │   ├── BCH/               # BCH encoder, OSD decoder, generator matrix
+        │   │   └── Sync/              # SchmidlCox correlator, TheilSen estimator, triggers
+        │   ├── RattlegramCLI/         # CLI: encode/decode WAV files
+        │   └── RattlegramBenchmark/   # CLI: performance benchmark
+        └── Tests/                     # 14 test files, 68 tests
 ```
 
-## Current State
+## Audio Pipeline
 
-### Completed
-- **RTTY**: Full TX/RX with multi-channel demodulator (8 channels)
-- **PSK**: Full TX/RX for PSK31, BPSK63, QPSK31, QPSK63 with multi-channel demodulator
-- **CW**: Full TX/RX with adaptive speed tracking (5-60 WPM), AFC, QSB fading resistance, hand-sent CW tolerance
-- **Rattlegram**: OFDM burst mode library complete (RattlegramCore). Not yet integrated into iOS app — see integration guide below.
-- **Mode Selection UI**: Card-based mode picker as app entry point
-- **Website**: GitHub Pages deployment with app landing page
-- iMessage-style channel navigation with compose button (bottom right)
-- Message transmit states with visual feedback (queued/transmitting/sent/failed)
-- Stop button cancels in-progress transmissions
-- Persistent settings via iCloud (baud rate, mark freq, shift)
-- Swipe-to-reveal timestamps
-- "Listening..." empty state when monitoring for signals
+```
+Radio ↔ USB Soundcard ↔ iPhone
 
-### Key Implementation Details
+AudioService (AVAudioEngine)
+  ├── Input tap (4096 samples, stereo→mono, 48kHz)
+  │   └── onAudioInput callback → ModemService
+  └── Player node (TX audio output)
 
-**Audio Pipeline**
-- `AudioService`: AVAudioEngine with input tap and player node
-- `onAudioInput` callback routes samples to ModemService
-- `ModemService`: bridges to AmateurDigitalCore's MultiChannelRTTYDemodulator
-- Decoded characters delivered via `ModemServiceDelegate`
+ModemService
+  ├── RTTY: MultiChannelRTTYDemodulator (8 channels, 1200-2600 Hz, 200 Hz spacing)
+  ├── PSK:  MultiChannelPSKDemodulator
+  ├── CW:   CWDemodulator (adaptive 5-60 WPM, AFC ±250 Hz)
+  ├── JS8:  JS8CallDemodulator (8-GFSK, LDPC decoding)
+  └── Rattlegram: Decoder (OFDM, feeds Int16 samples continuously)
+      └── Float↔Int16 conversion at boundary
 
-**Message TransmitState**
-- `.queued` - Gray bubble - message waiting in queue
-- `.transmitting` - Orange bubble - audio being played
-- `.sent` - Blue bubble - transmission complete
-- `.failed` - Red bubble - transmission error or cancelled
+Decoded text → ModemServiceDelegate → ChatViewModel → UI
+```
 
-**Settings (SettingsManager)**
-- Callsign, grid locator, RTTY baud rate, mark frequency, shift
-- Synced via NSUbiquitousKeyValueStore (iCloud)
-- Falls back to UserDefaults if iCloud unavailable
+**Sample format boundary**: AudioService uses `[Float]`. RattlegramCore uses `[Int16]`. ModemService converts at the boundary: `Float * 32768 → Int16` (RX), `Int16 / 32768 → Float` (TX).
 
-**Multi-Channel Decoding**
-- `MultiChannelRTTYDemodulator` monitors 8 frequencies (1200-2600 Hz, 200 Hz spacing)
-- Each channel has independent FSK demodulator
-- Characters grouped into messages with 2-second timeout
+## Message TransmitState
+- `.queued` → Gray bubble, waiting in queue
+- `.transmitting` → Orange bubble, audio playing
+- `.sent` → Blue bubble, transmission complete
+- `.failed` → Red bubble, error or cancelled
 
-### Technical Notes
+## Modem Parameters
 
-**RTTY Parameters (configurable)**
-- Baud rate: 45.45 baud (default), also 50, 75, 100
-- Shift: 170 Hz (default)
-- Mark frequency: 2125 Hz (default)
-- Sample rate: 48000 Hz
+| Mode | Baud | BW | Center Freq | Error Correction | Sample Rate |
+|------|------|----|-------------|-----------------|-------------|
+| RTTY | 45.45 (default) | ~250 Hz | Mark 2125 Hz, 170 Hz shift | None | 48000 |
+| PSK31 | 31.25 | ~60 Hz | 1000 Hz | None (BPSK) / Viterbi (QPSK) | 48000 |
+| BPSK63 | 62.5 | ~125 Hz | 1000 Hz | None | 48000 |
+| QPSK31 | 31.25 | ~60 Hz | 1000 Hz | Viterbi | 48000 |
+| QPSK63 | 62.5 | ~125 Hz | 1000 Hz | Viterbi | 48000 |
+| CW | 5-60 WPM adaptive | ~100 Hz | 700 Hz | None | 48000 |
+| JS8Call | 6.25 (8-GFSK) | ~50 Hz | Variable | LDPC | 48000 |
+| Rattlegram | N/A (OFDM) | ~1600 Hz | 1500 Hz | Polar + CRC-32 | 48000 |
 
-**PSK Parameters**
-- PSK31: BPSK, 31.25 baud
-- BPSK63: BPSK, 62.5 baud
-- QPSK31: QPSK, 31.25 baud (2 bits/symbol)
-- QPSK63: QPSK, 62.5 baud (2 bits/symbol)
-- Center frequency: 1000 Hz (default)
-- Sample rate: 48000 Hz
+**CW specifics**: Goertzel block ~10ms (480 samples), AFC range ±250 Hz in 25 Hz steps, rise/fall 5ms raised-cosine, dash:dot ratio 3.0 (handles 2.5-4.0). Benchmark: 96.3/100.
 
-**CW (Morse Code) Parameters**
-- Tone frequency: 700 Hz (default, configurable)
-- Speed: 5-60 WPM adaptive tracking (PARIS standard)
-- Sample rate: 48000 Hz
-- Goertzel block size: ~10ms (480 samples)
-- AFC range: ±250 Hz in 25 Hz steps
-- Rise/fall time: 5ms raised-cosine envelope
-- Dash-to-dot ratio: 3.0 (handles 2.5-4.0)
-- Benchmark score: 96.3/100 (clean=100, speed=100, noise=88, fading=97, jitter=93, AFC=98)
+## Codec APIs
 
-**Baudot Codec (RTTY)**
-- `BaudotCodec.encode(String) -> [UInt8]` - Text to 5-bit codes
-- `BaudotCodec.decode([UInt8]) -> String` - 5-bit codes to text
-- Handles LTRS (0x1F) and FIGS (0x1B) shift codes automatically
+```swift
+// Baudot (RTTY) — 5-bit ITA2, uppercase only, LTRS/FIGS shift codes
+BaudotCodec.encode(String) -> [UInt8]
+BaudotCodec.decode([UInt8]) -> String
 
-**Varicode Codec (PSK)**
-- `VaricodeCodec.encode(String) -> [Bool]` - Text to variable-length bits
-- `VaricodeCodec.decode([Bool]) -> String` - Bits to text
-- Variable-length encoding (common chars = fewer bits)
+// Varicode (PSK) — variable-length, common chars = fewer bits
+VaricodeCodec.encode(String) -> [Bool]
+VaricodeCodec.decode([Bool]) -> String
 
-**iOS Audio**
-- `AVAudioSession.Category.playAndRecord` with `.allowBluetoothA2DP`
-- Input tap: 4096 sample buffer, converts stereo to mono
-- nonisolated input handler for Sendable compliance
+// Morse (CW)
+MorseCodec.encode(Character) -> String   // e.g. ".-"
+MorseCodec.decode(String) -> Character?
+```
 
-## RattlegramCore — Integration Guide
-
-### What It Does
-
-Rattlegram transmits up to 170 bytes of UTF-8 text over audio in ~1 second using OFDM with polar error correction codes. Ported from the C++ Android app [rattlegram](https://github.com/aicodix/rattlegram) (44 header-only files). The Swift port is bit-identical to the C++ version. 68/68 tests pass including encode→decode round-trips.
-
-### How It Differs From RTTY/PSK
-
-| Aspect | RTTY/PSK | Rattlegram |
-|--------|----------|------------|
-| Sample format | `[Float]` | `[Int16]` |
-| Decoding | Character-by-character via delegate | Complete messages via `fetch()` |
-| Encoding | Returns `[Float]` array | Iterative `produce()` calls returning `[Int16]` |
-| TX duration | Depends on text length + baud | Fixed ~1 second burst |
-| Max message | Unlimited streaming | 170 bytes per burst |
-| Error correction | None (RTTY) / Viterbi (PSK) | Polar codes with CRC-32 |
-| Sync | Tone/phase detect | Schmidl-Cox OFDM correlator |
-
-### Public API
+## RattlegramCore API
 
 **Encoder** — text to audio:
 ```swift
-import RattlegramCore
-
 let encoder = Encoder(sampleRate: 48000)
-
-// Payload: up to 170 bytes of UTF-8, null-padded
 var payload = [UInt8](repeating: 0, count: 170)
 let bytes = Array("HELLO WORLD".utf8)
 for i in 0..<bytes.count { payload[i] = bytes[i] }
+encoder.configure(payload: payload, callSign: "W1AW", carrierFrequency: 1500)
 
-encoder.configure(
-    payload: payload,
-    callSign: "W1AW",           // up to 9 chars
-    carrierFrequency: 1500,     // Hz (audio carrier within the audio band)
-    noiseSymbols: 0,            // optional noise preamble
-    fancyHeader: false          // optional ASCII art callsign
-)
-
-// Produce audio one symbol at a time (extendedLength samples each)
 var buf = [Int16](repeating: 0, count: encoder.extendedLength)
 var allSamples = [Int16]()
-while encoder.produce(&buf) {
-    allSamples.append(contentsOf: buf)
-}
-allSamples.append(contentsOf: buf)  // final (silence) symbol
+while encoder.produce(&buf) { allSamples.append(contentsOf: buf) }
+allSamples.append(contentsOf: buf)  // final silence symbol
+// Total: ~69120 samples = 1.44 seconds at 48kHz
 ```
 
 **Decoder** — audio to text:
 ```swift
 let decoder = Decoder(sampleRate: 48000)
-
-// Feed audio continuously. Can be any chunk size.
-// The decoder buffers internally and returns true when a symbol is ready.
+// Feed audio continuously. Any chunk size. Decoder buffers internally.
 let ready = decoder.feed(int16Samples, sampleCount: count)
-
 if ready {
-    let status = decoder.process()
-    switch status {
-    case .sync:
-        let info = decoder.staged()
-        // info.cfo — carrier frequency offset in Hz
-        // info.mode — 14 (170 bytes), 15 (128 bytes), or 16 (85 bytes)
-        // info.callSign — sender's callsign
+    switch decoder.process() {
+    case .sync:  let info = decoder.staged()  // .cfo, .mode, .callSign
     case .done:
         var payload = [UInt8](repeating: 0, count: 170)
-        let flips = decoder.fetch(&payload)
-        if flips >= 0 {
-            // flips = number of corrected bit errors
-            let text = String(bytes: payload.prefix(while: { $0 != 0 }), encoding: .utf8)
-        }
-    case .ping:
-        let info = decoder.staged()
-        // Received a ping (mode 0, no payload) from info.callSign
-    case .nope:
-        break // unsupported mode
-    case .fail:
-        break // preamble CRC failed (noise / different protocol)
-    default:
-        break
+        let flips = decoder.fetch(&payload)  // flips = corrected bit errors
+        if flips >= 0 { /* success — decode payload as UTF-8 */ }
+    case .ping:  let info = decoder.staged()  // mode 0, no payload
+    case .fail:  break  // preamble CRC failed
+    default:     break
     }
 }
+// Decoder is stateful. After .done it auto-resets and looks for next transmission.
 ```
 
-**Key constants** (at 48kHz sample rate):
-- `encoder.extendedLength` = 8640 samples per symbol
-- `encoder.symbolLength` = 7680
-- Total TX = ~69120 samples = 1.44 seconds
-- Modes: 16 (≤85 bytes, strongest FEC), 15 (≤128 bytes), 14 (≤170 bytes, weakest FEC)
+**Modes**: 14 (≤170 bytes, weakest FEC), 15 (≤128 bytes), 16 (≤85 bytes, strongest FEC)
 
-### Integration Into the iOS App
+## Rattlegram iOS Integration Guide
 
-#### Step 1: Add Package Dependency
+The RattlegramCore library is complete and tested. Integration into the iOS app requires:
 
-In Xcode, add `AmateurDigital/RattlegramCore` as a local Swift Package reference (same pattern as AmateurDigitalCore). Add the `RattlegramCore` product to the app target's Frameworks.
+1. **Package dependency** — already added to xcodeproj as local package
+2. **DigitalMode** — add `.rattlegram` case in `Models/DigitalMode.swift`
+3. **ModeConfig** — add `.rattlegram` to `enabledModes` in `Config/ModeConfig.swift`
+4. **ModemService** — main work:
+   - RX: convert Float→Int16, feed to decoder, handle `.done` status, emit complete message
+   - TX: configure encoder, produce Int16 symbols, convert to Float
+   - Decoder is long-lived (create once, feed continuously, auto-resets after each decode)
+5. **UI** — rattlegram messages appear all at once (not character-by-character), show callsign from header, show bit-flip count as quality indicator, 170-byte compose limit
 
-#### Step 2: Add `.rattlegram` to DigitalMode
+## ML Models
 
-In `AmateurDigital/Models/DigitalMode.swift`, add a new case:
-```swift
-case rattlegram = "Rattlegram"
-```
-With properties:
-- `displayName`: "Rattlegram"
-- `subtitle`: "OFDM 170B/1s"
-- `description`: "OFDM burst mode with polar codes. Sends up to 170 bytes in ~1 second."
-- `centerFrequency`: 1500.0
-- `isPSKMode`: false
-- `iconName`: "bolt.horizontal" (or similar)
-- `color`: .teal
+Two CoreML models integrated into the iOS app:
 
-#### Step 3: Enable in ModeConfig
+- **HamTextClassifier** — logistic regression on text statistics (length, char ratios, entropy, n-grams). Detects ham radio text patterns (callsigns, RST reports, grid locators, CQ/DE/73).
+- **CallsignExtractor** — extracts ITU-format callsigns from decoded text.
 
-In `AmateurDigital/Config/ModeConfig.swift`, add `.rattlegram` to `enabledModes`.
+Training code in `HamTextClassifierTraining/` and `CallsignExtractorTraining/` (Python).
 
-#### Step 4: Add Rattlegram to ModemService
+## CI/CD
 
-The main integration work. In `ModemService.swift`:
+- `.github/workflows/test.yml` — runs `swift build && swift test` on AmateurDigitalCore (macOS 14, Xcode 15.4) on push to main or PRs
+- `.github/workflows/deploy-pages.yml` — deploys `website/` to GitHub Pages on push to main
 
-**Float ↔ Int16 conversion** — AudioService delivers `[Float]`, rattlegram expects `[Int16]`:
-```swift
-// RX: Float → Int16
-let int16Samples = floatSamples.map { Int16(clamping: Int(($0 * 32768.0).rounded())) }
+## Reference Material
 
-// TX: Int16 → Float
-let floatSamples = int16Samples.map { Float($0) / 32768.0 }
-```
-
-**RX (decoding)** — Add to `processRxSamples()`:
-```swift
-case .rattlegram:
-    let int16 = samples.map { Int16(clamping: Int(($0 * 32768.0).rounded())) }
-    if rattlegramDecoder.feed(int16, sampleCount: int16.count) {
-        let status = rattlegramDecoder.process()
-        // Handle .sync, .done, .ping, .fail
-        // On .done: fetch payload, emit as a complete message
-    }
-```
-
-**TX (encoding)** — Add to `encodeTxSamples()`:
-```swift
-case .rattlegram:
-    let encoder = Encoder(sampleRate: 48000)
-    var payload = [UInt8](repeating: 0, count: 170)
-    let bytes = Array(text.utf8)
-    for i in 0..<min(bytes.count, 170) { payload[i] = bytes[i] }
-    encoder.configure(payload: payload, callSign: settings.callSign)
-    var allSamples = [Float]()
-    var buf = [Int16](repeating: 0, count: encoder.extendedLength)
-    while encoder.produce(&buf) {
-        allSamples.append(contentsOf: buf.map { Float($0) / 32768.0 })
-    }
-    allSamples.append(contentsOf: buf.map { Float($0) / 32768.0 })
-    return allSamples
-```
-
-**Message delivery** — Unlike RTTY/PSK which emit character-by-character via `ModemServiceDelegate`, rattlegram delivers complete messages. Two options:
-1. **Emit all characters at once**: Loop through decoded text and call `delegate?.modemService(didDecode:)` for each character. Simple, fits existing pattern.
-2. **Add a new delegate method**: `modemService(_:didDecodeMessage:fromCallSign:onChannel:)`. Cleaner but requires delegate protocol changes.
-
-Option 1 is recommended for minimal integration effort.
-
-**Decoder lifecycle** — The Decoder is stateful. Create one instance and keep feeding it samples continuously. It runs the SchmidlCox correlator on every sample looking for sync. When it finds a transmission, it automatically decodes through to `.done`. After `.done`, it resets and starts looking for the next transmission. No explicit reset needed.
-
-#### Step 5: UI Considerations
-
-- Rattlegram messages are complete bursts, not streaming characters. The chat bubble should appear all at once after decode, not character-by-character.
-- Show the sender's callsign (from `decoder.staged().callSign`) in the message metadata.
-- Show bit flips count as a signal quality indicator (0 = perfect, higher = noisier).
-- TX is fast (~1 second). The transmit state can go from `.queued` → `.transmitting` → `.sent` quickly.
-- Consider showing a "170 byte limit" indicator on the compose view when in rattlegram mode.
-
-### Potential Tuning Needed
-
-1. **Carrier frequency**: Default 1500 Hz works for most radio setups. May want to make configurable in settings if users have narrow audio passband filters.
-2. **No AGC**: The decoder normalizes power internally (SchmidlCox uses power ratios, not absolute levels). Should work with typical soundcard input levels. If real-world testing shows issues with very quiet or loud signals, add a simple AGC before the Float→Int16 conversion.
-3. **Continuous decode**: The decoder looks for sync continuously. When no signal is present, `feed()` returns `true` periodically (every `extendedLength` samples) and `process()` returns `.okay` (no sync found). This is normal and lightweight.
-
-### Reference
-
-The C++ original is at `.reference/rattlegram/app/src/main/cpp/` (44 header-only files). The Swift port matches it exactly. Key files for understanding the protocol:
-- `encoder.hh` / `Encoder.swift` — OFDM frame structure
-- `decoder.hh` / `Decoder.swift` — Decode state machine
-- `schmidl_cox.hh` / `Sync/SchmidlCox.swift` — Sync detection
-- `polar.hh` / `Polar/PolarCodec.swift` — Error correction wrapper
+- `.reference/rattlegram/` — C++ original (44 header-only files). Swift port is bit-identical.
+- `.reference/fldigi-research.md` — detailed signal processing comparison and improvement roadmap with estimated SNR gains
+- `research/` — full source of fldigi, JS8Call, WSJT-X for algorithm reference
+- `AmateurDigital/AmateurDigitalCore/PSK_RND_NOTES.md` — PSK R&D log with AFC implementation notes and score history
+- `samples/` — RTTY and PSK WAV files at varying SNR levels for testing
 
 ## Conventions
 
 - Ham radio text is UPPERCASE
 - Callsigns follow ITU format (e.g., W1AW, K1ABC, N0CALL)
-- Common abbreviations: CQ (calling), DE (from), K (over), 73 (best regards)
-- RST = Readability, Signal strength, Tone (e.g., 599 = perfect)
+- Common abbreviations: CQ (calling), DE (from), K (over), 73 (best regards), RST (readability/signal/tone)
