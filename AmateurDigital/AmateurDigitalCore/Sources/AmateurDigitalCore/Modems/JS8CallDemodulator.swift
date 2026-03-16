@@ -208,11 +208,9 @@ public final class JS8CallDemodulator {
         let sub = currentConfiguration.submode
         let nsps = sub.nsps
         let nfft1 = sub.nfft1
-        let nh1 = nfft1 / 2
         let nstep = sub.nstep
         let nmax = dd.count
         let costas = sub.costas
-        let nfos = nfft1 / nsps  // frequency oversampling (2)
         let nssy = nsps / nstep   // steps per symbol (4)
 
         guard nmax > nsps * JS8CallConstants.NN else { return [] }
@@ -223,6 +221,15 @@ public final class JS8CallDemodulator {
         // Compute Nuttall window (cached per submode)
         let window = NuttallWindow.generateNormalized(length: nfft1, nsps: nsps)
         let fftSize = FFTProcessor.nextPow2(nfft1)
+        // The padded FFT has bin spacing dfPad = sampleRate/fftSize.
+        // We index the spectrogram using padded bins directly.
+        let dfPad = internalRate / Double(fftSize)  // Actual bin spacing (2.93 Hz for Normal)
+        let nh1 = fftSize / 2
+        // For Costas search: tone spacing in padded bins
+        // toneSpacing = sampleRate/nsps, so bins per tone = toneSpacing/dfPad = fftSize/nsps
+        // This may not be integer! Use Double for Costas indexing.
+        let toneStepBins = Double(fftSize) / Double(nsps)  // ~2.13 for Normal
+        let df = dfPad  // For frequency-to-bin and bin-to-frequency conversion
 
         // Compute spectrogram
         var s = [[Double]](repeating: [Double](repeating: 0, count: nh1), count: nhsym)
@@ -244,14 +251,18 @@ public final class JS8CallDemodulator {
         }
 
         // Costas sync search
-        let df = internalRate / Double(nfft1)
         let tstep = Double(nstep) / internalRate
         let ia = max(1, Int(frequencyRange.low / df))
-        let ib = min(nh1 - nfos * 7, Int(frequencyRange.high / df))
+        let ib = min(nh1 - toneBin(0, 7), Int(frequencyRange.high / df))
         guard ia < ib else { return [] }
-        let jstrt = Int(sub.startDelay / tstep)
+        let jstrt = Int((sub.startDelay / tstep) + 0.5)  // Round, don't truncate
 
         var candidates: [JS8SyncCandidate] = []
+
+        // Helper: bin offset for tone index (may be non-integer due to zero-padding)
+        func toneBin(_ baseBin: Int, _ toneIdx: Int) -> Int {
+            return baseBin + Int(Double(toneIdx) * toneStepBins + 0.5)
+        }
 
         for i in ia..<ib {
             var bestSyncForFreq = 0.0
@@ -264,26 +275,29 @@ public final class JS8CallDemodulator {
                 for n in 0..<7 {
                     let ka = jOff + jstrt + nssy * n
                     if ka >= 0 && ka < nhsym {
-                        let toneA = i + nfos * costas.a[n]
+                        let toneA = toneBin(i, costas.a[n])
                         if toneA >= 0 && toneA < nh1 { ta += s[ka][toneA] }
-                        for t in stride(from: i, through: min(i + nfos * 6, nh1 - 1), by: nfos) {
-                            t0a += s[ka][t]
+                        for tIdx in 0...6 {
+                            let t = toneBin(i, tIdx)
+                            if t >= 0 && t < nh1 { t0a += s[ka][t] }
                         }
                     }
                     let kb = jOff + jstrt + nssy * (n + 36)
                     if kb >= 0 && kb < nhsym {
-                        let toneB = i + nfos * costas.b[n]
+                        let toneB = toneBin(i, costas.b[n])
                         if toneB >= 0 && toneB < nh1 { tb += s[kb][toneB] }
-                        for t in stride(from: i, through: min(i + nfos * 6, nh1 - 1), by: nfos) {
-                            t0b += s[kb][t]
+                        for tIdx in 0...6 {
+                            let t = toneBin(i, tIdx)
+                            if t >= 0 && t < nh1 { t0b += s[kb][t] }
                         }
                     }
                     let kc = jOff + jstrt + nssy * (n + 72)
                     if kc >= 0 && kc < nhsym {
-                        let toneC = i + nfos * costas.c[n]
+                        let toneC = toneBin(i, costas.c[n])
                         if toneC >= 0 && toneC < nh1 { tc += s[kc][toneC] }
-                        for t in stride(from: i, through: min(i + nfos * 6, nh1 - 1), by: nfos) {
-                            t0c += s[kc][t]
+                        for tIdx in 0...6 {
+                            let t = toneBin(i, tIdx)
+                            if t >= 0 && t < nh1 { t0c += s[kc][t] }
                         }
                     }
                 }
@@ -342,7 +356,7 @@ public final class JS8CallDemodulator {
             } else {
                 let tuples = findCandidates(
                     dd: ddMutable, sub: sub, window: window, fftSize: fftSize, df: df, tstep: tstep,
-                    ia: ia, ib: ib, jstrt: jstrt, nfos: nfos, nssy: nssy, nhsym: nhsym
+                    ia: ia, ib: ib, jstrt: jstrt, toneStepBins: toneStepBins, nssy: nssy, nhsym: nhsym
                 )
                 candidateList = tuples.map { JS8SyncCandidate(freq: $0.freq, timeOffset: $0.timeOffset, sync: $0.sync) }
             }
@@ -385,13 +399,18 @@ public final class JS8CallDemodulator {
             let symStart = symStartBase + k * nsps
             guard symStart >= 0 && symStart + nsps <= dd.count else { continue }
 
+            // Direct DFT at each of the 8 tone frequencies.
             for tone in 0..<8 {
                 let freq = f1 + Double(tone) * sub.toneSpacing
-                var sumR = 0.0, sumI = 0.0
+                var sumR = 0.0
+                var sumI = 0.0
+                let dphase = twopi * freq / internalRate
+                var phase = dphase * Double(symStart)
                 for i in 0..<nsps {
-                    let phase = twopiOverSR * freq * Double(symStart + i)
-                    sumR += dd[symStart + i] * cos(phase)
-                    sumI += dd[symStart + i] * sin(phase)
+                    let sample = dd[symStart + i]
+                    sumR += sample * cos(phase)
+                    sumI += sample * sin(phase)
+                    phase += dphase
                 }
                 s2[k][tone] = sumR * sumR + sumI * sumI
             }
@@ -421,7 +440,7 @@ public final class JS8CallDemodulator {
         for k in 0..<JS8CallConstants.NN {
             if k < 7 { continue }
             if k >= 36 && k <= 42 { continue }
-            if k > 72 { continue }
+            if k >= 72 { continue }  // Costas C starts at symbol 72
             if j < JS8CallConstants.ND {
                 s1[j] = s2[k]
                 j += 1
@@ -567,11 +586,12 @@ public final class JS8CallDemodulator {
 
     private func findCandidates(
         dd: [Double], sub: JS8CallSubmode, window: [Double], fftSize: Int,
-        df: Double, tstep: Double, ia: Int, ib: Int, jstrt: Int, nfos: Int, nssy: Int, nhsym: Int
+        df: Double, tstep: Double, ia: Int, ib: Int, jstrt: Int, toneStepBins: Double, nssy: Int, nhsym: Int
     ) -> [(freq: Double, timeOffset: Double, sync: Double)] {
         // Recompute spectrogram on subtracted audio
         let nstep = sub.nstep
-        let nh1 = sub.nfft1 / 2
+        let resFftSize = FFTProcessor.nextPow2(sub.nfft1)
+        let nh1 = resFftSize / 2
         let costas = sub.costas
         let nmax = dd.count
 
@@ -580,8 +600,8 @@ public final class JS8CallDemodulator {
             let ia_s = j * nstep
             let ib_s = ia_s + sub.nfft1
             guard ib_s <= nmax else { break }
-            var re = [Double](repeating: 0, count: fftSize)
-            var im = [Double](repeating: 0, count: fftSize)
+            var re = [Double](repeating: 0, count: resFftSize)
+            var im = [Double](repeating: 0, count: resFftSize)
             for i in 0..<sub.nfft1 { re[i] = dd[ia_s + i] * window[i] }
             FFTProcessor.fft(&re, &im)
             for i in 0..<nh1 { s[j][i] = re[i] * re[i] + im[i] * im[i] }
@@ -597,23 +617,26 @@ public final class JS8CallDemodulator {
                 var t0a = 0.0, t0b = 0.0, t0c = 0.0
 
                 for n in 0..<7 {
+                    func toneBinR(_ base: Int, _ tone: Int) -> Int {
+                        base + Int(Double(tone) * toneStepBins + 0.5)
+                    }
                     let ka = jOff + jstrt + nssy * n
                     if ka >= 0 && ka < nhsym {
-                        let tA = i + nfos * costas.a[n]
+                        let tA = toneBinR(i, costas.a[n])
                         if tA >= 0 && tA < nh1 { ta += s[ka][tA] }
-                        for t in stride(from: i, through: min(i + nfos * 6, nh1 - 1), by: nfos) { t0a += s[ka][t] }
+                        for tIdx in 0...6 { let t = toneBinR(i, tIdx); if t >= 0 && t < nh1 { t0a += s[ka][t] } }
                     }
                     let kb = jOff + jstrt + nssy * (n + 36)
                     if kb >= 0 && kb < nhsym {
-                        let tB = i + nfos * costas.b[n]
+                        let tB = toneBinR(i, costas.b[n])
                         if tB >= 0 && tB < nh1 { tb += s[kb][tB] }
-                        for t in stride(from: i, through: min(i + nfos * 6, nh1 - 1), by: nfos) { t0b += s[kb][t] }
+                        for tIdx in 0...6 { let t = toneBinR(i, tIdx); if t >= 0 && t < nh1 { t0b += s[kb][t] } }
                     }
                     let kc = jOff + jstrt + nssy * (n + 72)
                     if kc >= 0 && kc < nhsym {
-                        let tC = i + nfos * costas.c[n]
+                        let tC = toneBinR(i, costas.c[n])
                         if tC >= 0 && tC < nh1 { tc += s[kc][tC] }
-                        for t in stride(from: i, through: min(i + nfos * 6, nh1 - 1), by: nfos) { t0c += s[kc][t] }
+                        for tIdx in 0...6 { let t = toneBinR(i, tIdx); if t >= 0 && t < nh1 { t0c += s[kc][t] } }
                     }
                 }
 

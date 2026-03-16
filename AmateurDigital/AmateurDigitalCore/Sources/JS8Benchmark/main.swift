@@ -458,20 +458,24 @@ func js8Decode(audio: [Float], submode: JS8Submode, freqRange: (Double, Double) 
 
     // Work with at most nmax samples
     let dd: [Double] = Array(audio.prefix(nmax)).map { Double($0) }
-    guard dd.count > nsps * JS8.NN else { return nil }
+    print("    [DEBUG] dd.count=\(dd.count), need>\(nsps * JS8.NN), nmax=\(nmax), audio.count=\(audio.count)")
+    guard dd.count > nsps * JS8.NN else {
+        print("    [DEBUG] Audio too short!")
+        return nil
+    }
 
     let nfft1 = 2 * nsps
-    let df = JS8.rxSampleRate / Double(nfft1)
     let nstep = nsps / 4
     let nhsym = dd.count / nstep - 3
     guard nhsym > 0 else { return nil }
 
-    let nh1 = nfft1 / 2
-    let nfos = nfft1 / nsps  // frequency oversampling factor (2)
+    let fftSizeBench = nextPow2(nfft1)
+    let nh1 = fftSizeBench / 2
+    let df = JS8.rxSampleRate / Double(fftSizeBench)
+    let toneStep = Double(fftSizeBench) / Double(nsps)  // Non-integer tone step in bins
     let nssy = nsps / nstep   // steps per symbol (4)
 
     // Compute spectrogram
-    let fftSize = nextPow2(nfft1)
     var s = [[Double]](repeating: [Double](repeating: 0, count: nh1), count: nhsym)
 
     // Nuttall window
@@ -490,8 +494,8 @@ func js8Decode(audio: [Float], submode: JS8Submode, freqRange: (Double, Double) 
         let ib = ia + nfft1
         guard ib <= dd.count else { break }
 
-        var re = [Double](repeating: 0, count: fftSize)
-        var im = [Double](repeating: 0, count: fftSize)
+        var re = [Double](repeating: 0, count: fftSizeBench)
+        var im = [Double](repeating: 0, count: fftSizeBench)
         for i in 0..<nfft1 {
             re[i] = dd[ia + i] * window[i]
         }
@@ -502,11 +506,17 @@ func js8Decode(audio: [Float], submode: JS8Submode, freqRange: (Double, Double) 
     }
 
     // Search for Costas sync
+    // Helper: bin for tone index using floating-point step
+    func tBin(_ base: Int, _ tone: Int) -> Int {
+        base + Int(Double(tone) * toneStep + 0.5)
+    }
+
     let ia = max(1, Int(freqRange.0 / df))
-    let ib = min(nh1 - nfos * 7, Int(freqRange.1 / df))
+    let ib = min(nh1 - tBin(0, 7), Int(freqRange.1 / df))
     guard ia < ib else { return nil }
 
-    let jstrt = Int(submode.startDelay / (Double(nstep) / JS8.rxSampleRate))
+    let tstepBench = Double(nstep) / JS8.rxSampleRate
+    let jstrt = Int((submode.startDelay / tstepBench) + 0.5)
 
     var bestSync = 0.0
     var bestFreqBin = 0
@@ -520,27 +530,21 @@ func js8Decode(audio: [Float], submode: JS8Submode, freqRange: (Double, Double) 
             for n in 0..<7 {
                 let ka = jOff + jstrt + nssy * n
                 if ka >= 0 && ka < nhsym {
-                    let toneIdx = i + nfos * costas.a[n]
-                    if toneIdx < nh1 { ta += s[ka][toneIdx] }
-                    for t in stride(from: i, through: min(i + nfos * 6, nh1 - 1), by: nfos) {
-                        t0a += s[ka][t]
-                    }
+                    let toneIdx = tBin(i, costas.a[n])
+                    if toneIdx >= 0 && toneIdx < nh1 { ta += s[ka][toneIdx] }
+                    for tIdx in 0...6 { let t = tBin(i, tIdx); if t >= 0 && t < nh1 { t0a += s[ka][t] } }
                 }
                 let kb = jOff + jstrt + nssy * (n + 36)
                 if kb >= 0 && kb < nhsym {
-                    let toneIdx = i + nfos * costas.b[n]
-                    if toneIdx < nh1 { tb += s[kb][toneIdx] }
-                    for t in stride(from: i, through: min(i + nfos * 6, nh1 - 1), by: nfos) {
-                        t0b += s[kb][t]
-                    }
+                    let toneIdx = tBin(i, costas.b[n])
+                    if toneIdx >= 0 && toneIdx < nh1 { tb += s[kb][toneIdx] }
+                    for tIdx in 0...6 { let t = tBin(i, tIdx); if t >= 0 && t < nh1 { t0b += s[kb][t] } }
                 }
                 let kc = jOff + jstrt + nssy * (n + 72)
                 if kc >= 0 && kc < nhsym {
-                    let toneIdx = i + nfos * costas.c[n]
-                    if toneIdx < nh1 { tc += s[kc][toneIdx] }
-                    for t in stride(from: i, through: min(i + nfos * 6, nh1 - 1), by: nfos) {
-                        t0c += s[kc][t]
-                    }
+                    let toneIdx = tBin(i, costas.c[n])
+                    if toneIdx >= 0 && toneIdx < nh1 { tc += s[kc][toneIdx] }
+                    for tIdx in 0...6 { let t = tBin(i, tIdx); if t >= 0 && t < nh1 { t0c += s[kc][t] } }
                 }
             }
 
@@ -560,7 +564,11 @@ func js8Decode(audio: [Float], submode: JS8Submode, freqRange: (Double, Double) 
         }
     }
 
-    guard bestSync >= 1.5 else { return nil }  // ASYNCMIN
+    print("    [DEBUG] bestSync=\(String(format: "%.3f", bestSync)) freqBin=\(bestFreqBin) df=\(df) freq=\(Double(bestFreqBin)*df) timeOff=\(bestTimeOff) jstrt=\(jstrt) nhsym=\(nhsym) ia=\(ia) ib=\(ib)")
+    if bestSync < 1.5 {
+        print("    [DEBUG] Sync FAILED")
+        return nil
+    }
 
     let f1 = Double(bestFreqBin) * df
     let t0 = Double(bestTimeOff + jstrt) * Double(nstep) / JS8.rxSampleRate
@@ -577,14 +585,20 @@ func js8Decode(audio: [Float], submode: JS8Submode, freqRange: (Double, Double) 
         let symStart = symStartBase + k * nsps
         guard symStart >= 0 && symStart + nsps <= dd.count else { continue }
 
+        // Direct DFT at each of the 8 tone frequencies.
+        // This correlates the signal against each tone to extract power.
+        // No FFT needed — just compute the DFT coefficient at each tone.
         for tone in 0..<8 {
             let freq = f1 + Double(tone) * submode.toneSpacing
             var sumR = 0.0
             var sumI = 0.0
+            let dphase = 2.0 * Double.pi * freq / JS8.rxSampleRate
+            var phase = dphase * Double(symStart)
             for i in 0..<nsps {
-                let phase = twopiOverSR * freq * Double(symStart + i)
-                sumR += dd[symStart + i] * cos(phase)
-                sumI += dd[symStart + i] * sin(phase)
+                let sample = Double(dd[symStart + i])
+                sumR += sample * cos(phase)
+                sumI += sample * sin(phase)
+                phase += dphase
             }
             s2[k][tone] = sumR * sumR + sumI * sumI
         }
@@ -596,7 +610,7 @@ func js8Decode(audio: [Float], submode: JS8Submode, freqRange: (Double, Double) 
     for k in 0..<JS8.NN {
         if k < 7 { continue }
         if k >= 36 && k <= 42 { continue }
-        if k > 72 { continue }
+        if k >= 72 { continue }  // Costas C starts at 72
         if j < JS8.ND {
             s1[j] = s2[k]
             j += 1
@@ -621,8 +635,20 @@ func js8Decode(audio: [Float], submode: JS8Submode, freqRange: (Double, Double) 
     let sigma = sqrt(max(variance, 1e-10))
     for i in 0..<JS8.N { llr[i] = 2.83 * (llr[i] - avg) / sigma }
 
+    // Debug: check tone powers for first few symbols
+    // Debug: show all 8 tone powers for first Costas symbol
+    let powers0 = s2[0].map { String(format: "%.1f", $0) }.joined(separator: ", ")
+    let maxTone0 = s2[0].enumerated().max(by: { $0.element < $1.element })
+    let maxTone7 = s2[7].enumerated().max(by: { $0.element < $1.element })
+    print("    [DEBUG] sym0 powers: [\(powers0)]")
+    print("    [DEBUG] Costas[0]: peak tone=\(maxTone0?.offset ?? -1) (expect \(submode.costasType == .original ? 4 : 0)), data[7]: peak=\(maxTone7?.offset ?? -1)")
+    print("    [DEBUG] f1=\(f1) t0=\(t0) symStartBase=\(symStartBase) nsps=\(nsps)")
+
     // BP decode
-    guard let decoded = bpDecode(llr: llr, maxIterations: 30) else { return nil }
+    guard let decoded = bpDecode(llr: llr, maxIterations: 30) else {
+        print("    [DEBUG] BP decode FAILED")
+        return nil
+    }
 
     // Check CRC
     var bytes = [UInt8](repeating: 0, count: 11)
