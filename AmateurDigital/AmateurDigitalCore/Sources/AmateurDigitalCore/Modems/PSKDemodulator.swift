@@ -75,11 +75,22 @@ public final class PSKDemodulator {
     private var prevI: Double = 0
     private var prevQ: Double = 0
 
-    /// Symbol timing recovery
+    /// Symbol timing recovery (Gardner TED)
     private var symbolSamples: Int = 0
     private var symbolTimingAdjust: Int = 0
     private var earlyMag: Double = 0
     private var lateMag: Double = 0
+
+    /// Gardner TED state: midpoint and previous symbol IQ
+    private var midpointI: Double = 0
+    private var midpointQ: Double = 0
+    private var prevSymbolI: Double = 0
+    private var prevSymbolQ: Double = 0
+
+    /// Gardner loop filter state (second-order PLL)
+    private var gardnerIntegrator: Double = 0
+    private let gardnerProportionalGain: Double = 0.002
+    private let gardnerIntegralGain: Double = 0.000005
 
     /// On-time I/Q accumulator (middle half of symbol for robust phase estimate)
     private var onTimeAccumI: Double = 0
@@ -302,9 +313,14 @@ public final class PSKDemodulator {
         let samplesPerSymbol = configuration.samplesPerSymbol
         let quarterSymbol = samplesPerSymbol / 4
 
-        // Record filtered amplitude at 25% and 75% of symbol for timing recovery
+        // Record filtered amplitude at 25% and 75% of symbol for legacy timing recovery,
+        // and midpoint IQ for Gardner TED
         if symbolSamples == quarterSymbol {
             earlyMag = iFiltered * iFiltered + qFiltered * qFiltered
+        } else if symbolSamples == 2 * quarterSymbol {
+            // Midpoint sample for Gardner TED: y(n - 1/2)
+            midpointI = iFiltered
+            midpointQ = qFiltered
         } else if symbolSamples == 3 * quarterSymbol {
             lateMag = iFiltered * iFiltered + qFiltered * qFiltered
         }
@@ -388,21 +404,43 @@ public final class PSKDemodulator {
 
     /// Process a complete symbol
     private func processSymbol() {
-        // Symbol timing recovery: compare amplitude at 25% vs 75% of symbol.
-        // For raised-cosine shaped PSK, amplitude is highest at mid-symbol.
-        // If we're sampling late, the late measurement catches a transition dip.
-        let timingError = earlyMag - lateMag
-        let normalizedError = (earlyMag + lateMag) > 0
-            ? timingError / (earlyMag + lateMag)
-            : 0
-
-        let maxAdjust = Int(maxTimingAdjustFraction * Double(configuration.samplesPerSymbol))
-        let rawAdjust = Int(normalizedError * timingGain * Double(configuration.samplesPerSymbol))
-        symbolTimingAdjust = max(-maxAdjust, min(maxAdjust, -rawAdjust))
-
         // Use accumulated I/Q from middle half of symbol for robust phase estimate
         let currentI = onTimeAccumI
         let currentQ = onTimeAccumQ
+
+        // Hybrid timing recovery: early-late gate with Gardner TED correction.
+        // The early-late gate provides stable baseline tracking.
+        // Gardner TED provides fine correction when signal is strong.
+        //
+        // Early-late: compare amplitude at 25% vs 75% of symbol.
+        // If late, the 75% sample catches a transition dip.
+        let earlyLateError = earlyMag - lateMag
+        let earlyLateNorm = (earlyMag + lateMag) > 0
+            ? earlyLateError / (earlyMag + lateMag) : 0
+
+        // Gardner TED: error = Re{ y(n-1/2) * conj(y(n) - y(n-1)) }
+        let diffI = currentI - prevSymbolI
+        let diffQ = currentQ - prevSymbolQ
+        let gardnerError = midpointI * diffI + midpointQ * diffQ
+
+        // Normalize Gardner error
+        let symPower = currentI * currentI + currentQ * currentQ
+        let gardnerNorm = symPower > 0.001 ? gardnerError / symPower : 0
+
+        // Gardner loop filter (integral term for long-term drift)
+        gardnerIntegrator += gardnerNorm * gardnerIntegralGain
+        gardnerIntegrator = max(-0.1, min(0.1, gardnerIntegrator))
+
+        // Combine: early-late for primary, Gardner integral for drift correction
+        let combinedError = earlyLateNorm + gardnerIntegrator
+
+        let maxAdjust = Int(maxTimingAdjustFraction * Double(configuration.samplesPerSymbol))
+        let rawAdjust = Int(combinedError * timingGain * Double(configuration.samplesPerSymbol))
+        symbolTimingAdjust = max(-maxAdjust, min(maxAdjust, -rawAdjust))
+
+        // Store current symbol for next Gardner computation
+        prevSymbolI = currentI
+        prevSymbolQ = currentQ
 
         // Update signal detection with adaptive noise floor
         let symbolPower = currentI * currentI + currentQ * currentQ
@@ -759,6 +797,11 @@ public final class PSKDemodulator {
         symbolTimingAdjust = 0
         earlyMag = 0
         lateMag = 0
+        midpointI = 0
+        midpointQ = 0
+        prevSymbolI = 0
+        prevSymbolQ = 0
+        gardnerIntegrator = 0
         onTimeAccumI = 0
         onTimeAccumQ = 0
         signalPower = 0
