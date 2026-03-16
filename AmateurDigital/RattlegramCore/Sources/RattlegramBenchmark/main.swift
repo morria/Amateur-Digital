@@ -204,7 +204,7 @@ func decode(samples: [Int16], sampleRate: Int) -> DecodeResult {
     // Add leading and trailing silence
     let leadingSilence = [Int16](repeating: 0, count: extLen * 2)
     let trailingSilence = [Int16](repeating: 0, count: extLen * 2)
-    var input = leadingSilence + samples + trailingSilence
+    let input = leadingSilence + samples + trailingSilence
 
     var offset = 0
     var synced = false

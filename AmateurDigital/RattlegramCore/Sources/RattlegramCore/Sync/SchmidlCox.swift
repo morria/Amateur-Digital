@@ -47,8 +47,8 @@ public final class SchmidlCox {
         pwr = SMA4<Float>(size: 2 * symbolLength, normalize: false)
         match = SMA4<Float>(size: matchLen, normalize: false)
         align = Delay<Float>(size: matchDel, initial: 0)
-        threshold = SchmittTrigger(low: 0.08 * Float(matchLen),
-                                    high: 0.10 * Float(matchLen))
+        threshold = SchmittTrigger(low: 0.10 * Float(matchLen),
+                                    high: 0.12 * Float(matchLen))
         falling = FallingEdgeTrigger()
 
         // Precompute kernel from correlation sequence
@@ -152,7 +152,7 @@ public final class SchmidlCox {
             }
         }
 
-        if peak <= next * 2 {
+        if peak < next * 2.5 {
             return false
         }
 
