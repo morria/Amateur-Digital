@@ -100,10 +100,13 @@ public final class PSKDemodulator {
     private var phaseQualityTotalSymbols: Int = 0     // total symbols since signal detected
     private let phaseQualityThreshold: Double = 0.70  // quality must exceed this to sustain
 
-    // MARK: - Bandpass Filter
+    // MARK: - Bandpass Filters
 
-    /// Bandpass filter for out-of-band noise rejection
+    /// IIR bandpass filter for out-of-band noise rejection (~40 dB)
     private var bandpassFilter: BandpassFilter
+
+    /// FFT-based FIR bandpass for deep rejection (~73 dB)
+    private var fftBandpassFilter: OverlapAddFilter
 
     // MARK: - AGC Properties
 
@@ -238,6 +241,14 @@ public final class PSKDemodulator {
             highCutoff: configuration.centerFrequency + margin,
             sampleRate: configuration.sampleRate
         )
+
+        // FFT-based FIR bandpass for deep rejection (-73 dB)
+        self.fftBandpassFilter = OverlapAddFilter.bandpass(
+            lowCutoff: configuration.centerFrequency - margin,
+            highCutoff: configuration.centerFrequency + margin,
+            sampleRate: configuration.sampleRate,
+            taps: 257
+        )
     }
 
     /// IIR filter coefficient, computed from baud rate and sample rate.
@@ -252,7 +263,9 @@ public final class PSKDemodulator {
     /// Process a buffer of audio samples
     /// - Parameter samples: Audio samples to process
     public func process(samples: [Float]) {
-        for sample in samples {
+        // Apply FFT bandpass filter to entire buffer first (efficient block processing)
+        let fftFiltered = fftBandpassFilter.process(samples)
+        for sample in fftFiltered {
             processSample(sample)
         }
     }
@@ -766,6 +779,7 @@ public final class PSKDemodulator {
         afcPreambleSampleCount = 0
         varicodeCodec.reset()
         bandpassFilter.reset()
+        fftBandpassFilter.reset()
         agcGain = 1.0
         noiseFloor = 0.1
     }
@@ -781,6 +795,13 @@ public final class PSKDemodulator {
             lowCutoff: configuration.centerFrequency - margin,
             highCutoff: configuration.centerFrequency + margin,
             sampleRate: configuration.sampleRate
+        )
+
+        fftBandpassFilter = OverlapAddFilter.bandpass(
+            lowCutoff: configuration.centerFrequency - margin,
+            highCutoff: configuration.centerFrequency + margin,
+            sampleRate: configuration.sampleRate,
+            taps: 257
         )
 
         reset()

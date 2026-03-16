@@ -34,6 +34,10 @@ let package = Package(
             name: "JS8Benchmark",
             targets: ["JS8Benchmark"]
         ),
+        .executable(
+            name: "RTTYBenchmark",
+            targets: ["RTTYBenchmark"]
+        ),
     ],
     targets: [
         .target(
@@ -65,6 +69,11 @@ let package = Package(
             name: "JS8Benchmark",
             dependencies: ["AmateurDigitalCore"],
             path: "Sources/JS8Benchmark"
+        ),
+        .executableTarget(
+            name: "RTTYBenchmark",
+            dependencies: ["AmateurDigitalCore"],
+            path: "Sources/RTTYBenchmark"
         ),
         .testTarget(
             name: "AmateurDigitalCoreTests",
