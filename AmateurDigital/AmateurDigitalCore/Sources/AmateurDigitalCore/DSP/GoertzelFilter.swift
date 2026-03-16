@@ -118,6 +118,40 @@ public struct GoertzelFilter {
         return sqrt(calculatePower())
     }
 
+    // MARK: - Complex Output (for phase-based AFC)
+
+    /// Calculate the complex DFT output at the target frequency.
+    /// The real and imaginary parts enable phase measurement for sub-Hz AFC.
+    ///
+    /// From the Goertzel algorithm, the complex result is:
+    ///   X[k] = s1 - s2 * exp(-j*2*pi*k/N)
+    /// where k = (N * targetFrequency) / sampleRate
+    private func calculateComplex() -> (real: Float, imag: Float) {
+        let k = (Double(blockSize) * targetFrequency) / sampleRate
+        let angle = Float(2.0 * .pi * k / Double(blockSize))
+        let real = s1 - s2 * cos(angle)
+        let imag = s2 * sin(angle)
+        return (real, imag)
+    }
+
+    /// Process a block and return the complex DFT output.
+    /// Use this for phase-based AFC: phase = atan2(imag, real).
+    public mutating func processBlockComplex(_ samples: [Float]) -> (real: Float, imag: Float) {
+        reset()
+        for sample in samples.prefix(blockSize) {
+            s0 = sample + coefficient * s1 - s2
+            s2 = s1
+            s1 = s0
+        }
+        return calculateComplex()
+    }
+
+    /// Process a block and return the instantaneous phase in radians (-pi to +pi).
+    public mutating func processBlockPhase(_ samples: [Float]) -> Float {
+        let c = processBlockComplex(samples)
+        return atan2(c.imag, c.real)
+    }
+
     // MARK: - Control
 
     /// Reset filter state

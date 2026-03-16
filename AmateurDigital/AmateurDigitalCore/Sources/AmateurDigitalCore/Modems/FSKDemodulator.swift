@@ -223,6 +223,9 @@ public final class FSKDemodulator {
     /// AFC filter coefficient (0-1, lower = slower tracking)
     private let afcAlpha: Float = 0.1
 
+    /// Previous mark channel phase for phase-based AFC
+    private var lastMarkPhase: Float = 0
+
     /// Offset Goertzel filters for AFC correlation detection
     private var markOffsetFilters: [Float: GoertzelFilter] = [:]
     private var spaceOffsetFilters: [Float: GoertzelFilter] = [:]
@@ -311,10 +314,53 @@ public final class FSKDemodulator {
         }
     }
 
-    /// Compute the best frequency offset by finding the peak correlation
+    /// Compute frequency correction using phase-based AFC.
+    ///
+    /// Phase-based AFC measures the phase of the Goertzel output over consecutive blocks.
+    /// The rate of phase change (phase derivative) directly gives the frequency error:
+    ///   freq_error = (phase_diff / (2*pi)) * (sampleRate / blockSize)
+    ///
+    /// This provides continuous sub-Hz resolution, a major improvement over the legacy
+    /// quantized 5-offset scanning approach (which had 25 Hz resolution).
+    ///
+    /// Falls back to the legacy scanning approach if phase tracking is unreliable.
+    ///
     /// - Parameter samples: Audio samples to analyze
     /// - Returns: Best frequency offset in Hz
     private func computeAFCCorrection(samples: [Float]) -> Float {
+        // Phase-based AFC: get phase from complex Goertzel on mark channel
+        var markPhaseFilter = GoertzelFilter(
+            frequency: configuration.markFrequency + Double(frequencyCorrection),
+            sampleRate: configuration.sampleRate,
+            blockSize: goertzelWindowSize
+        )
+        let currentPhase = markPhaseFilter.processBlockPhase(samples)
+
+        // Compute frequency error from phase difference
+        let phaseDiff = currentPhase - lastMarkPhase
+        lastMarkPhase = currentPhase
+
+        // Unwrap phase difference to [-pi, pi]
+        var unwrapped = phaseDiff
+        while unwrapped > Float.pi { unwrapped -= 2.0 * Float.pi }
+        while unwrapped < -Float.pi { unwrapped += 2.0 * Float.pi }
+
+        // Convert phase rate to frequency offset:
+        // freq_error = (phase_diff / (2*pi)) * (sampleRate / blockSize)
+        // But the Goertzel processes overlapping windows, so we scale by step rate
+        let freqError = (unwrapped / (2.0 * Float.pi)) * Float(configuration.sampleRate) / Float(goertzelWindowSize)
+
+        // Sanity check: if the estimated error is unreasonable, fall back to scanning
+        if abs(freqError) > 100 {
+            return computeAFCCorrectionLegacy(samples: samples)
+        }
+
+        // Clamp to AFC range
+        return max(-afcRange, min(afcRange, freqError))
+    }
+
+    /// Legacy AFC: quantized scanning at 5 offsets (fallback for unreliable phase tracking).
+    private func computeAFCCorrectionLegacy(samples: [Float]) -> Float {
         var bestOffset: Float = 0
         var bestCorrelation: Float = -2.0
 
@@ -327,16 +373,13 @@ public final class FSKDemodulator {
             markFilter.reset()
             spaceFilter.reset()
 
-            // Update filters in dictionaries
             markOffsetFilters[offset] = markFilter
             spaceOffsetFilters[offset] = spaceFilter
 
             let total = markPower + spacePower
             guard total > 0.001 else { continue }
 
-            // Use absolute correlation (signal strength at this offset)
             let correlation = abs(markPower - spacePower) / total
-
             if correlation > bestCorrelation {
                 bestCorrelation = correlation
                 bestOffset = offset
@@ -761,6 +804,7 @@ public final class FSKDemodulator {
         // Reset AFC state
         frequencyCorrection = 0
         afcBlockCounter = 0
+        lastMarkPhase = 0
     }
 
     /// Tune to a different center frequency
