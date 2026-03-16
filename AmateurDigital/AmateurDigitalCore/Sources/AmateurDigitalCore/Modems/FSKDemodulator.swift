@@ -80,8 +80,12 @@ public final class FSKDemodulator {
     private var spaceFilter: GoertzelFilter
     private let baudotCodec: BaudotCodec
 
-    /// Bandpass filter for out-of-band noise rejection
+    /// Bandpass filter for out-of-band noise rejection (IIR, ~40 dB)
     private var bandpassFilter: BandpassFilter
+
+    /// High-performance FFT bandpass filter (~73 dB rejection)
+    /// Used in series with the IIR filter for maximum rejection.
+    private var fftBandpassFilter: OverlapAddFilter
 
     /// Current state machine state
     public private(set) var state: DemodulatorState = .waitingForStart
@@ -172,6 +176,25 @@ public final class FSKDemodulator {
         squelchLevel > 0 ? squelchLevel : adaptiveSquelchLevel
     }
 
+    // MARK: - ATC (Automatic Threshold Correction) Properties
+    // Based on Kok Chen (W7AY) "Improved Automatic Threshold Correction Methods for FSK"
+    // The optimal ATC handles selective fading where mark/space fade independently.
+
+    /// Mark channel envelope (fast-charge, slow-discharge tracking of mark power)
+    private var markEnvelope: Float = 0
+    /// Space channel envelope
+    private var spaceEnvelope: Float = 0
+    /// Shared noise floor estimate for ATC (separate from squelch noise floor)
+    private var atcNoiseFloor: Float = 0.001
+
+    /// Envelope attack rate (fast rise to follow signal increases)
+    private let envelopeAttack: Float = 0.05
+    /// Envelope decay rate (slow fall to track fading)
+    private let envelopeDecay: Float = 0.002
+    /// ATC noise floor tracking rate
+    private let atcNoiseAttack: Float = 0.02
+    private let atcNoiseDecay: Float = 0.0005
+
     // MARK: - Confidence Tracking
 
     /// Minimum confidence threshold for character output
@@ -250,6 +273,15 @@ public final class FSKDemodulator {
             spaceFrequency: configuration.spaceFrequency,
             margin: 75.0,
             sampleRate: configuration.sampleRate
+        )
+
+        // FFT-based bandpass for deep rejection (-73 dB)
+        self.fftBandpassFilter = OverlapAddFilter.fskBandpass(
+            markFrequency: configuration.markFrequency,
+            spaceFrequency: configuration.spaceFrequency,
+            margin: 50.0,
+            sampleRate: configuration.sampleRate,
+            taps: 257
         )
 
         // Initialize AFC offset filters
@@ -339,6 +371,15 @@ public final class FSKDemodulator {
             sampleRate: configuration.sampleRate
         )
 
+        // Update FFT bandpass filter center
+        fftBandpassFilter = OverlapAddFilter.fskBandpass(
+            markFrequency: newMarkFreq,
+            spaceFrequency: newMarkFreq - configuration.shift,
+            margin: 50.0,
+            sampleRate: configuration.sampleRate,
+            taps: 257
+        )
+
         // Rebuild offset filters around new center
         initializeAFCFilters()
     }
@@ -348,15 +389,18 @@ public final class FSKDemodulator {
     /// Process a buffer of audio samples
     /// - Parameter samples: Audio samples to process
     public func process(samples: [Float]) {
-        for sample in samples {
+        // Apply FFT bandpass filter to entire buffer first (efficient block processing)
+        let fftFiltered = fftBandpassFilter.process(samples)
+
+        for sample in fftFiltered {
             processSample(sample)
         }
     }
 
-    /// Process a single audio sample
+    /// Process a single audio sample (after FFT bandpass)
     /// - Parameter sample: Audio sample value
     private func processSample(_ sample: Float) {
-        // Apply bandpass filter to reject out-of-band noise
+        // Apply IIR bandpass filter for additional rejection
         let filteredSample = bandpassFilter.process(sample)
 
         // Apply AGC to normalize signal level
@@ -437,20 +481,77 @@ public final class FSKDemodulator {
         noiseFloor = max(0.01, min(0.5, noiseFloor))
     }
 
-    /// Analyze the sliding analysis window and return mark/space correlation
+    /// Analyze the sliding analysis window using the W7AY Optimal ATC detector.
+    ///
+    /// The optimal ATC handles selective fading where one tone fades independently:
+    /// 1. Track mark and space envelopes (fast attack, slow decay)
+    /// 2. Track noise floor from the minimum of both channels
+    /// 3. Clip signals between noise floor and envelope
+    /// 4. Apply optimal decision: v = (m-nf)*(env_m-nf) - (s-nf)*(env_s-nf) - bias
+    ///
+    /// This automatically behaves as a mark-only or space-only demodulator during
+    /// deep selective fading, eliminating the 3 dB noise penalty of traditional ATC.
+    ///
+    /// Reference: http://www.w7ay.net/site/Technical/ATC/
+    ///
     /// - Returns: Correlation value: positive = mark, negative = space
     private func analyzeBlock() -> Float {
-        let markPower = markFilter.processBlock(analysisWindow)
-        let spacePower = spaceFilter.processBlock(analysisWindow)
+        let m = markFilter.processBlock(analysisWindow)
+        let s = spaceFilter.processBlock(analysisWindow)
 
         markFilter.reset()
         spaceFilter.reset()
 
-        // Compute correlation: (mark - space) / (mark + space)
-        let total = markPower + spacePower
-        guard total > 0.001 else { return 0 }  // Silence
+        // Update mark envelope (fast attack, slow decay)
+        if m > markEnvelope {
+            markEnvelope = markEnvelope + (m - markEnvelope) * envelopeAttack
+        } else {
+            markEnvelope = markEnvelope + (m - markEnvelope) * envelopeDecay
+        }
 
-        let correlation = (markPower - spacePower) / total
+        // Update space envelope
+        if s > spaceEnvelope {
+            spaceEnvelope = spaceEnvelope + (s - spaceEnvelope) * envelopeAttack
+        } else {
+            spaceEnvelope = spaceEnvelope + (s - spaceEnvelope) * envelopeDecay
+        }
+
+        // Update ATC noise floor from the minimum of both channels.
+        // The noise floor should track the quieter channel, which during
+        // selective fading is the faded-out tone.
+        let minPower = min(m, s)
+        if minPower < atcNoiseFloor {
+            atcNoiseFloor = atcNoiseFloor + (minPower - atcNoiseFloor) * atcNoiseAttack
+        } else {
+            atcNoiseFloor = atcNoiseFloor + (minPower - atcNoiseFloor) * atcNoiseDecay
+        }
+        atcNoiseFloor = max(0.0001, atcNoiseFloor)
+
+        let nf = atcNoiseFloor
+
+        // Clip mark: constrain between noise floor and envelope
+        let mClipped = max(0, min(m - nf, markEnvelope - nf))
+        let sClipped = max(0, min(s - nf, spaceEnvelope - nf))
+
+        // Noise-subtracted envelopes
+        let envM = max(0, markEnvelope - nf)
+        let envS = max(0, spaceEnvelope - nf)
+
+        // Optimal ATC decision (W7AY equation):
+        // v = (m_clipped * env_m) - (s_clipped * env_s) - 0.5*(env_m^2 - env_s^2)
+        // The multiplication by envelope gives more weight to the stronger channel,
+        // which is the one NOT affected by selective fading.
+        let mProduct = mClipped * envM
+        let sProduct = sClipped * envS
+        let mBias = 0.5 * envM * envM
+        let sBias = 0.5 * envS * envS
+
+        let v = (mProduct - sProduct) - (mBias - sBias)
+
+        // Normalize to [-1, 1] range for compatibility with rest of demodulator
+        let maxScale = max(mBias + sBias, 0.0001)
+        let correlation = max(-1.0, min(1.0, v / maxScale))
+
         return polarityInverted ? -correlation : correlation
     }
 
@@ -647,11 +748,15 @@ public final class FSKDemodulator {
         markFilter.reset()
         spaceFilter.reset()
         bandpassFilter.reset()
+        fftBandpassFilter.reset()
         baudotCodec.reset()
         _signalDetected = false
         agcGain = 1.0
         noiseFloor = 0.1
         lastCharacterConfidence = 0
+        markEnvelope = 0
+        spaceEnvelope = 0
+        atcNoiseFloor = 0.001
 
         // Reset AFC state
         frequencyCorrection = 0
@@ -680,6 +785,14 @@ public final class FSKDemodulator {
             spaceFrequency: configuration.spaceFrequency,
             margin: 75.0,
             sampleRate: configuration.sampleRate
+        )
+
+        fftBandpassFilter = OverlapAddFilter.fskBandpass(
+            markFrequency: configuration.markFrequency,
+            spaceFrequency: configuration.spaceFrequency,
+            margin: 50.0,
+            sampleRate: configuration.sampleRate,
+            taps: 257
         )
 
         reset()

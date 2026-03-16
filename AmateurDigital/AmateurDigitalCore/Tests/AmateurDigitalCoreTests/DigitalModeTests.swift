@@ -10,7 +10,7 @@ final class DigitalModeTests: XCTestCase {
 
     func testAllCases() {
         let allModes = DigitalMode.allCases
-        XCTAssertEqual(allModes.count, 7)
+        XCTAssertEqual(allModes.count, 8)
         XCTAssertTrue(allModes.contains(.rtty))
         XCTAssertTrue(allModes.contains(.psk31))
         XCTAssertTrue(allModes.contains(.bpsk63))
