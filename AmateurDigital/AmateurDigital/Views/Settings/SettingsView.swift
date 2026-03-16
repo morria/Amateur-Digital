@@ -221,6 +221,9 @@ struct SettingsView: View {
                         Toggle(isOn: $settings.enableCW) {
                             Label("CW (Morse)", systemImage: "dot.radiowaves.right")
                         }
+                        Toggle(isOn: $settings.enableJS8Call) {
+                            Label("JS8Call", systemImage: "antenna.radiowaves.left.and.right")
+                        }
                     } header: {
                         HStack {
                             Text("Experimental Modes")
@@ -943,6 +946,7 @@ struct AmateurBand: Identifiable {
     let rttyFreq: String?      // Calling frequency for RTTY
     let pskFreq: String?       // Calling frequency for PSK modes
     let oliviaFreq: String?    // Calling frequency for Olivia
+    let js8callFreq: String?   // Calling frequency for JS8Call
     let notes: String?         // Additional notes
 }
 
@@ -955,6 +959,7 @@ enum FrequencyReference {
             rttyFreq: "1.800-1.810",
             pskFreq: "1.838",
             oliviaFreq: "1.838",
+            js8callFreq: "1.842",
             notes: String(localized: "Night-time band, long-range")
         ),
         AmateurBand(
@@ -963,6 +968,7 @@ enum FrequencyReference {
             rttyFreq: "3.580-3.600",
             pskFreq: "3.580",
             oliviaFreq: "3.583",
+            js8callFreq: "3.578",
             notes: String(localized: "Best at night, regional")
         ),
         AmateurBand(
@@ -971,6 +977,7 @@ enum FrequencyReference {
             rttyFreq: "7.080-7.100",
             pskFreq: "7.070",
             oliviaFreq: "7.073",
+            js8callFreq: "7.078",
             notes: String(localized: "Day/night, very popular")
         ),
         AmateurBand(
@@ -979,6 +986,7 @@ enum FrequencyReference {
             rttyFreq: "10.140-10.150",
             pskFreq: "10.142",
             oliviaFreq: "10.145",
+            js8callFreq: "10.130",
             notes: String(localized: "WARC band, no contests")
         ),
         AmateurBand(
@@ -987,6 +995,7 @@ enum FrequencyReference {
             rttyFreq: "14.080-14.099",
             pskFreq: "14.070",
             oliviaFreq: "14.073",
+            js8callFreq: "14.078",
             notes: String(localized: "Primary DX band, daytime")
         ),
         AmateurBand(
@@ -995,6 +1004,7 @@ enum FrequencyReference {
             rttyFreq: "18.100-18.109",
             pskFreq: "18.100",
             oliviaFreq: "18.103",
+            js8callFreq: "18.104",
             notes: String(localized: "WARC band, daytime")
         ),
         AmateurBand(
@@ -1003,6 +1013,7 @@ enum FrequencyReference {
             rttyFreq: "21.080-21.100",
             pskFreq: "21.070",
             oliviaFreq: "21.073",
+            js8callFreq: "21.078",
             notes: String(localized: "Daytime, solar-dependent")
         ),
         AmateurBand(
@@ -1011,6 +1022,7 @@ enum FrequencyReference {
             rttyFreq: "24.920-24.929",
             pskFreq: "24.920",
             oliviaFreq: "24.923",
+            js8callFreq: "24.922",
             notes: String(localized: "WARC band, solar-dependent")
         ),
         AmateurBand(
@@ -1019,6 +1031,7 @@ enum FrequencyReference {
             rttyFreq: "28.080-28.100",
             pskFreq: "28.120",
             oliviaFreq: "28.123",
+            js8callFreq: "28.078",
             notes: String(localized: "Daytime, solar maximum")
         ),
         AmateurBand(
@@ -1027,6 +1040,7 @@ enum FrequencyReference {
             rttyFreq: nil,
             pskFreq: "50.290",
             oliviaFreq: "50.293",
+            js8callFreq: "50.318",
             notes: String(localized: "Sporadic E propagation")
         )
     ]
@@ -1044,6 +1058,8 @@ enum FrequencyReference {
             return bands  // CW works on any band
         case .rattlegram:
             return bands  // Rattlegram works on any band
+        case .js8call:
+            return bands.filter { $0.js8callFreq != nil }
         }
     }
 }
@@ -1231,6 +1247,9 @@ struct BandFrequencyRow: View {
             if ModeConfig.isEnabled(.olivia), let oliviaFreq = band.oliviaFreq {
                 frequencyRow(mode: "Olivia", frequency: oliviaFreq)
             }
+            if ModeConfig.isEnabled(.js8call), let js8Freq = band.js8callFreq {
+                frequencyRow(mode: "JS8Call", frequency: js8Freq)
+            }
         }
     }
 
@@ -1246,6 +1265,8 @@ struct BandFrequencyRow: View {
             return band.pskFreq  // Use PSK frequency as reference
         case .cw:
             return band.rttyFreq  // CW typically near RTTY frequencies
+        case .js8call:
+            return band.js8callFreq
         }
     }
 
@@ -1303,6 +1324,8 @@ struct CompactFrequencyReference: View {
             return band.pskFreq  // Use PSK frequency as reference
         case .cw:
             return band.rttyFreq  // CW typically near RTTY frequencies
+        case .js8call:
+            return band.js8callFreq
         }
     }
 }

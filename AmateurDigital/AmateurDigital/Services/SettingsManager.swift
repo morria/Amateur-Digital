@@ -168,6 +168,10 @@ class SettingsManager: NSObject, ObservableObject {
         didSet { save(enableCW, forKey: "enableCW") }
     }
 
+    @Published var enableJS8Call: Bool {
+        didSet { save(enableJS8Call, forKey: "enableJS8Call") }
+    }
+
     // CW Settings
     @Published var cwWPM: Double {
         didSet { save(cwWPM, forKey: "cwWPM") }
@@ -248,6 +252,7 @@ class SettingsManager: NSObject, ObservableObject {
         self.enableQPSK63 = Self.initialLoadBool(forKey: "enableQPSK63", default: false)
         self.enableRattlegram = Self.initialLoadBool(forKey: "enableRattlegram", default: false)
         self.enableCW = Self.initialLoadBool(forKey: "enableCW", default: false)
+        self.enableJS8Call = Self.initialLoadBool(forKey: "enableJS8Call", default: false)
 
         self.cwWPM = Self.initialLoadDouble(forKey: "cwWPM", default: 20.0)
         self.cwToneFrequency = Self.initialLoadDouble(forKey: "cwToneFrequency", default: 700.0)
@@ -337,6 +342,7 @@ class SettingsManager: NSObject, ObservableObject {
             self.enableQPSK63 = loadBool(forKey: "enableQPSK63", default: false)
             self.enableRattlegram = loadBool(forKey: "enableRattlegram", default: false)
             self.enableCW = loadBool(forKey: "enableCW", default: false)
+            self.enableJS8Call = loadBool(forKey: "enableJS8Call", default: false)
             self.cwWPM = loadDouble(forKey: "cwWPM", default: 20.0)
             self.cwToneFrequency = loadDouble(forKey: "cwToneFrequency", default: 700.0)
             self.cwSquelch = loadDouble(forKey: "cwSquelch", default: 0.0)

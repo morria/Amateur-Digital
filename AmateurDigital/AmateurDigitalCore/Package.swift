@@ -30,6 +30,10 @@ let package = Package(
             name: "CWBenchmark",
             targets: ["CWBenchmark"]
         ),
+        .executable(
+            name: "JS8Benchmark",
+            targets: ["JS8Benchmark"]
+        ),
     ],
     targets: [
         .target(
@@ -56,6 +60,11 @@ let package = Package(
             name: "CWBenchmark",
             dependencies: ["AmateurDigitalCore"],
             path: "Sources/CWBenchmark"
+        ),
+        .executableTarget(
+            name: "JS8Benchmark",
+            dependencies: ["AmateurDigitalCore"],
+            path: "Sources/JS8Benchmark"
         ),
         .testTarget(
             name: "AmateurDigitalCoreTests",

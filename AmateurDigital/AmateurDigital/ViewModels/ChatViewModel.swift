@@ -334,7 +334,7 @@ class ChatViewModel: ObservableObject {
             initialSquelch = Int(settings.psk31Squelch * 100)
         case .cw:
             initialSquelch = Int(settings.cwSquelch * 100)
-        case .olivia, .rattlegram:
+        case .olivia, .rattlegram, .js8call:
             initialSquelch = 0
         }
 
@@ -533,7 +533,7 @@ class ChatViewModel: ObservableObject {
             initialSquelch = Int(settings.psk31Squelch * 100)
         case .cw:
             initialSquelch = Int(settings.cwSquelch * 100)
-        case .olivia, .rattlegram:
+        case .olivia, .rattlegram, .js8call:
             initialSquelch = 0
         }
 

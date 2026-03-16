@@ -104,6 +104,13 @@ struct ChannelDetailView: View {
                 return "CQ CQ CQ DE \(call) \(call) K"
             }
             return "CQ CQ CQ DE \(call) \(call) \(grid) K"
+
+        case .js8call:
+            // JS8Call uses the 67-char alphabet (uppercase preferred)
+            if grid.isEmpty {
+                return "CQ CQ DE \(call) K"
+            }
+            return "CQ CQ DE \(call) \(grid) K"
         }
     }
 

@@ -217,6 +217,10 @@ class ModemService: ObservableObject {
     // MARK: - CW Modem
 
     private var cwModem: CWModem?
+
+    // MARK: - JS8Call Modem
+
+    private var js8callModem: JS8CallModem?
     #endif
 
     // MARK: - Rattlegram Modem
@@ -240,6 +244,12 @@ class ModemService: ObservableObject {
         case .cw:
             #if canImport(AmateurDigitalCore)
             return cwModem != nil
+            #else
+            return false
+            #endif
+        case .js8call:
+            #if canImport(AmateurDigitalCore)
+            return js8callModem != nil
             #else
             return false
             #endif
@@ -314,6 +324,10 @@ class ModemService: ObservableObject {
         // Create CW modem
         self.cwModem = CWModem(configuration: currentCWConfiguration)
         self.cwModem?.delegate = self
+
+        // Create JS8Call modem
+        self.js8callModem = JS8CallModem(configuration: .normal)
+        self.js8callModem?.delegate = self
         #else
         print("[ModemService] DigiModesCore not available - running in placeholder mode")
         // Setup default channel frequencies for placeholder mode
@@ -399,6 +413,10 @@ class ModemService: ObservableObject {
             break
         case .rattlegram:
             channelFrequencies = [1500.0]
+        case .js8call:
+            js8callModem = JS8CallModem(configuration: .normal)
+            js8callModem?.delegate = self
+            channelFrequencies = [1000.0]
         }
         #endif
     }
@@ -473,6 +491,11 @@ class ModemService: ObservableObject {
             rattlegramProcessor?.reset()
             #endif
             channelFrequencies = [1500.0]
+
+        case .js8call:
+            js8callModem = JS8CallModem(configuration: .normal)
+            js8callModem?.delegate = self
+            channelFrequencies = [1000.0]
         }
         #endif
     }
@@ -490,6 +513,9 @@ class ModemService: ObservableObject {
 
         // Reset CW modem
         cwModem?.reset()
+
+        // Reset JS8Call modem
+        js8callModem?.reset()
         #endif
 
         #if canImport(RattlegramCore)
@@ -554,6 +580,11 @@ class ModemService: ObservableObject {
 
         case .rattlegram:
             break  // Handled below with separate canImport
+
+        case .js8call:
+            js8callModem?.process(samples: samples)
+            signalStrength = 0
+            isDecoding = js8callModem?.isSignalDetected ?? false
         }
         #endif
 
@@ -608,6 +639,15 @@ class ModemService: ObservableObject {
             samples = txModem.encodeWithEnvelope(
                 text: text,
                 preambleMs: Double(settings.txPreambleMs),
+                postambleMs: 200
+            )
+
+        case .js8call:
+            guard let modem = js8callModem else { return nil }
+            samples = modem.encodeWithEnvelope(
+                text: text,
+                frameType: 0,
+                preambleMs: 0,
                 postambleMs: 200
             )
 
@@ -685,6 +725,21 @@ class ModemService: ObservableObject {
                 postambleMs: 200
             )
 
+        case .js8call:
+            let config: JS8CallConfiguration
+            if let freq = frequency {
+                config = JS8CallConfiguration.normal.withCarrierFrequency(freq)
+            } else {
+                config = .normal
+            }
+            let txModem = JS8CallModem(configuration: config)
+            return txModem.encodeWithEnvelope(
+                text: text,
+                frameType: 0,
+                preambleMs: 0,
+                postambleMs: 200
+            )
+
         case .olivia, .rattlegram:
             return []
         }
@@ -707,8 +762,8 @@ class ModemService: ObservableObject {
             guard let modem = pskModem else { return nil }
             samples = modem.generateIdle(duration: duration)
 
-        case .cw, .olivia, .rattlegram:
-            // CW doesn't have a continuous idle tone
+        case .cw, .olivia, .rattlegram, .js8call:
+            // CW/JS8Call don't have a continuous idle tone
             return nil
         }
 
@@ -761,8 +816,8 @@ class ModemService: ObservableObject {
             // Generate idle carrier for PSK phase lock
             return txModem.generateIdle(duration: durationSeconds)
 
-        case .cw, .olivia, .rattlegram:
-            // CW/Rattlegram have built-in sync, no preamble needed
+        case .cw, .olivia, .rattlegram, .js8call:
+            // CW/Rattlegram/JS8Call have built-in sync, no preamble needed
             return nil
         }
         #else
@@ -1032,6 +1087,39 @@ extension ModemService: PSKModemDelegate {
         Task { @MainActor in
             self.isDecoding = detected
             delegate?.modemService(self, signalDetected: detected, onChannel: frequency, mode: self.activeMode)
+        }
+    }
+}
+
+// MARK: - JS8CallModemDelegate
+
+extension ModemService: JS8CallModemDelegate {
+    nonisolated func modem(
+        _ modem: JS8CallModem,
+        didDecode frame: JS8CallFrame
+    ) {
+        Task { @MainActor in
+            // JS8Call delivers complete frames, not characters.
+            // Use the burst-mode delegate method (like Rattlegram).
+            delegate?.modemService(
+                self,
+                didDecodeMessage: frame.message,
+                callSign: nil,
+                bitFlips: Int((1.0 - frame.quality) * 60),
+                onChannel: frame.frequency,
+                mode: .js8call
+            )
+        }
+    }
+
+    nonisolated func modem(
+        _ modem: JS8CallModem,
+        signalDetected detected: Bool,
+        count: Int
+    ) {
+        Task { @MainActor in
+            self.isDecoding = detected
+            delegate?.modemService(self, signalDetected: detected, onChannel: 1000.0, mode: .js8call)
         }
     }
 }
