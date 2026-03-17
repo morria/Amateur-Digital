@@ -239,20 +239,23 @@ public final class JS8CallDemodulator {
             // Compute Goertzel power at 8 tones for each time step
             var tonePower = [[Double]](repeating: [Double](repeating: 0, count: 8), count: nhsym)
 
+            // Use full symbol period (nsps) for Goertzel analysis for better
+            // frequency selectivity (6.25 Hz resolution vs 25 Hz with nstep).
+            // Still step by nstep for time resolution.
+            let goertzelLen = nsps
             for tone in 0..<8 {
                 let freq = carrierFreq + Double(tone) * toneSpacing
+                let k = freq * Double(goertzelLen) / internalRate
+                let coeff = Float(2.0 * cos(twopi * k / Double(goertzelLen)))
                 for j in 0..<nhsym {
                     let start = j * nstep
-                    guard start + nstep <= nmax else { break }
-                    // Inline Goertzel for speed
-                    let k = freq * Double(nstep) / internalRate
-                    let coeff = Float(2.0 * cos(twopi * k / Double(nstep)))
-                    var s0: Float = 0, s1: Float = 0, s2: Float = 0
-                    for i in 0..<nstep {
-                        s0 = ddFloat[start + i] + coeff * s1 - s2
-                        s2 = s1; s1 = s0
+                    guard start + goertzelLen <= nmax else { break }
+                    var s0: Float = 0, s1: Float = 0, s2g: Float = 0
+                    for i in 0..<goertzelLen {
+                        s0 = ddFloat[start + i] + coeff * s1 - s2g
+                        s2g = s1; s1 = s0
                     }
-                    tonePower[j][tone] = Double(s1 * s1 + s2 * s2 - coeff * s1 * s2)
+                    tonePower[j][tone] = Double(s1 * s1 + s2g * s2g - coeff * s1 * s2g)
                 }
             }
 
