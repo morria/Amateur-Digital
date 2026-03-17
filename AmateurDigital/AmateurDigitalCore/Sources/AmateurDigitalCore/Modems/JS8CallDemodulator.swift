@@ -225,7 +225,7 @@ public final class JS8CallDemodulator {
 
         // Goertzel-based sync: compute power at 8 tones for each carrier frequency.
         // Search carriers in toneSpacing steps across the passband.
-        let freqStep = toneSpacing
+        let freqStep = toneSpacing / 2.0  // Half-tone steps for better frequency resolution
         let minFreq = max(frequencyRange.low, 100.0)
         let maxFreq = min(frequencyRange.high, internalRate / 2.0 - 8.0 * toneSpacing)
 
