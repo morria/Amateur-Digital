@@ -243,13 +243,13 @@ public final class JS8CallDemodulator {
 
         var carrierFreq = minFreq
         while carrierFreq <= maxFreq {
-            // Compute Goertzel power at 8 tones for each time step
+            // Compute Goertzel power at 8 tones for each time step.
+            // Use nstep (quarter-symbol) block for coarse sync search (4x faster than nsps).
+            // The reduced frequency selectivity (25 Hz vs 6.25 Hz) is adequate for
+            // finding candidates; fine resolution is applied in symbol extraction.
             var tonePower = [[Double]](repeating: [Double](repeating: 0, count: 8), count: nhsym)
 
-            // Use full symbol period (nsps) for Goertzel analysis for better
-            // frequency selectivity (6.25 Hz resolution vs 25 Hz with nstep).
-            // Still step by nstep for time resolution.
-            let goertzelLen = nsps
+            let goertzelLen = nsps  // Full symbol period for reliable sync
             for tone in 0..<8 {
                 let freq = carrierFreq + Double(tone) * toneSpacing
                 let k = freq * Double(goertzelLen) / internalRate
