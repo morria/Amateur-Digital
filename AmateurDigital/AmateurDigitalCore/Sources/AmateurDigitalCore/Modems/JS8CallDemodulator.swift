@@ -204,68 +204,60 @@ public final class JS8CallDemodulator {
     }
 
     /// Main decoder: multi-pass Costas sync + LDPC decode.
+    /// Uses Goertzel filters at exact tone frequencies to avoid FFT bin alignment issues.
     private func runDecoder(dd: [Double]) -> [JS8CallFrame] {
         let sub = currentConfiguration.submode
         let nsps = sub.nsps
-        let nfft1 = sub.nfft1
         let nstep = sub.nstep
         let nmax = dd.count
         let costas = sub.costas
-        let nssy = nsps / nstep   // steps per symbol (4)
+        let nssy = nsps / nstep
+        let toneSpacing = sub.toneSpacing
+        let twopi = 2.0 * Double.pi
 
         guard nmax > nsps * JS8CallConstants.NN else { return [] }
 
         let nhsym = nmax / nstep - 3
         guard nhsym > 0 else { return [] }
 
-        // Compute Nuttall window (cached per submode)
-        let window = NuttallWindow.generateNormalized(length: nfft1, nsps: nsps)
-        let fftSize = FFTProcessor.nextPow2(nfft1)
-        // The padded FFT has bin spacing dfPad = sampleRate/fftSize.
-        // We index the spectrogram using padded bins directly.
-        let dfPad = internalRate / Double(fftSize)  // Actual bin spacing (2.93 Hz for Normal)
-        let nh1 = fftSize / 2
-        // For Costas search: tone spacing in padded bins
-        // toneSpacing = sampleRate/nsps, so bins per tone = toneSpacing/dfPad = fftSize/nsps
-        // This may not be integer! Use Double for Costas indexing.
-        let toneStepBins = Double(fftSize) / Double(nsps)  // ~2.13 for Normal
-        let df = dfPad  // For frequency-to-bin and bin-to-frequency conversion
-
-        // Compute spectrogram
-        var s = [[Double]](repeating: [Double](repeating: 0, count: nh1), count: nhsym)
-
-        for j in 0..<nhsym {
-            let ia = j * nstep
-            let ib = ia + nfft1
-            guard ib <= nmax else { break }
-
-            var re = [Double](repeating: 0, count: fftSize)
-            var im = [Double](repeating: 0, count: fftSize)
-            for i in 0..<nfft1 {
-                re[i] = dd[ia + i] * window[i]
-            }
-            FFTProcessor.fft(&re, &im)
-            for i in 0..<nh1 {
-                s[j][i] = re[i] * re[i] + im[i] * im[i]
-            }
-        }
-
-        // Costas sync search
         let tstep = Double(nstep) / internalRate
-        let ia = max(1, Int(frequencyRange.low / df))
-        let ib = min(nh1 - toneBin(0, 7), Int(frequencyRange.high / df))
-        guard ia < ib else { return [] }
-        let jstrt = Int((sub.startDelay / tstep) + 0.5)  // Round, don't truncate
+        let jstrt = Int((sub.startDelay / tstep) + 0.5)
+
+        // Goertzel-based sync: compute power at 8 tones for each carrier frequency.
+        // Search carriers in toneSpacing steps across the passband.
+        let freqStep = toneSpacing
+        let minFreq = max(frequencyRange.low, 100.0)
+        let maxFreq = min(frequencyRange.high, internalRate / 2.0 - 8.0 * toneSpacing)
+
+        // Pre-convert dd to Float for Goertzel (it expects [Float])
+        let ddFloat = dd.map { Float($0) }
 
         var candidates: [JS8SyncCandidate] = []
 
-        // Helper: bin offset for tone index (may be non-integer due to zero-padding)
-        func toneBin(_ baseBin: Int, _ toneIdx: Int) -> Int {
-            return baseBin + Int(Double(toneIdx) * toneStepBins + 0.5)
-        }
+        var carrierFreq = minFreq
+        while carrierFreq <= maxFreq {
+            // Compute Goertzel power at 8 tones for each time step
+            var tonePower = [[Double]](repeating: [Double](repeating: 0, count: 8), count: nhsym)
 
-        for i in ia..<ib {
-            var bestSyncForFreq = 0.0
+            for tone in 0..<8 {
+                let freq = carrierFreq + Double(tone) * toneSpacing
+                for j in 0..<nhsym {
+                    let start = j * nstep
+                    guard start + nstep <= nmax else { break }
+                    // Inline Goertzel for speed
+                    let k = freq * Double(nstep) / internalRate
+                    let coeff = Float(2.0 * cos(twopi * k / Double(nstep)))
+                    var s0: Float = 0, s1: Float = 0, s2: Float = 0
+                    for i in 0..<nstep {
+                        s0 = ddFloat[start + i] + coeff * s1 - s2
+                        s2 = s1; s1 = s0
+                    }
+                    tonePower[j][tone] = Double(s1 * s1 + s2 * s2 - coeff * s1 * s2)
+                }
+            }
+
+            // Search time offsets for Costas sync
+            var bestSync = 0.0
             var bestJOff = 0
 
             for jOff in -sub.jz...sub.jz {
@@ -275,34 +267,21 @@ public final class JS8CallDemodulator {
                 for n in 0..<7 {
                     let ka = jOff + jstrt + nssy * n
                     if ka >= 0 && ka < nhsym {
-                        let toneA = toneBin(i, costas.a[n])
-                        if toneA >= 0 && toneA < nh1 { ta += s[ka][toneA] }
-                        for tIdx in 0...6 {
-                            let t = toneBin(i, tIdx)
-                            if t >= 0 && t < nh1 { t0a += s[ka][t] }
-                        }
+                        ta += tonePower[ka][costas.a[n]]
+                        for t in 0..<7 { t0a += tonePower[ka][t] }
                     }
                     let kb = jOff + jstrt + nssy * (n + 36)
                     if kb >= 0 && kb < nhsym {
-                        let toneB = toneBin(i, costas.b[n])
-                        if toneB >= 0 && toneB < nh1 { tb += s[kb][toneB] }
-                        for tIdx in 0...6 {
-                            let t = toneBin(i, tIdx)
-                            if t >= 0 && t < nh1 { t0b += s[kb][t] }
-                        }
+                        tb += tonePower[kb][costas.b[n]]
+                        for t in 0..<7 { t0b += tonePower[kb][t] }
                     }
                     let kc = jOff + jstrt + nssy * (n + 72)
                     if kc >= 0 && kc < nhsym {
-                        let toneC = toneBin(i, costas.c[n])
-                        if toneC >= 0 && toneC < nh1 { tc += s[kc][toneC] }
-                        for tIdx in 0...6 {
-                            let t = toneBin(i, tIdx)
-                            if t >= 0 && t < nh1 { t0c += s[kc][t] }
-                        }
+                        tc += tonePower[kc][costas.c[n]]
+                        for t in 0..<7 { t0c += tonePower[kc][t] }
                     }
                 }
 
-                // Partial sync: try ABC, AB, BC and take best
                 let bg_abc = (t0a + t0b + t0c - ta - tb - tc) / 6.0
                 let sync_abc = bg_abc > 0 ? (ta + tb + tc) / bg_abc : 0
                 let bg_ab = (t0a + t0b - ta - tb) / 6.0
@@ -311,19 +290,18 @@ public final class JS8CallDemodulator {
                 let sync_bc = bg_bc > 0 ? (tb + tc) / bg_bc : 0
 
                 let sync = max(sync_abc, sync_ab, sync_bc)
-                if sync > bestSyncForFreq {
-                    bestSyncForFreq = sync
-                    bestJOff = jOff
-                }
+                if sync > bestSync { bestSync = sync; bestJOff = jOff }
             }
 
-            if bestSyncForFreq >= JS8CallConstants.asyncMin {
+            if bestSync >= JS8CallConstants.asyncMin {
                 candidates.append(JS8SyncCandidate(
-                    freq: Double(i) * df,
+                    freq: carrierFreq,
                     timeOffset: Double(bestJOff + jstrt) * tstep,
-                    sync: bestSyncForFreq
+                    sync: bestSync
                 ))
             }
+
+            carrierFreq += freqStep
         }
 
         // Sort by sync strength (descending)
@@ -350,16 +328,9 @@ public final class JS8CallDemodulator {
             // Re-sync on passes 2+ if we had decodes
             if ipass > 0 && decoded.isEmpty { break }
 
-            let candidateList: [JS8SyncCandidate]
-            if ipass == 0 {
-                candidateList = candidates
-            } else {
-                let tuples = findCandidates(
-                    dd: ddMutable, sub: sub, window: window, fftSize: fftSize, df: df, tstep: tstep,
-                    ia: ia, ib: ib, jstrt: jstrt, toneStepBins: toneStepBins, nssy: nssy, nhsym: nhsym
-                )
-                candidateList = tuples.map { JS8SyncCandidate(freq: $0.freq, timeOffset: $0.timeOffset, sync: $0.sync) }
-            }
+            // For multi-pass, re-use the initial candidates (signal subtraction
+            // modifies ddMutable but we decode at the same frequencies).
+            let candidateList = candidates
 
             for cand in candidateList {
                 if let frame = decodeSingleJS8SyncCandidate(
@@ -399,20 +370,17 @@ public final class JS8CallDemodulator {
             let symStart = symStartBase + k * nsps
             guard symStart >= 0 && symStart + nsps <= dd.count else { continue }
 
-            // Direct DFT at each of the 8 tone frequencies.
+            // Goertzel at each of the 8 tone frequencies (exact, no bin mapping)
             for tone in 0..<8 {
                 let freq = f1 + Double(tone) * sub.toneSpacing
-                var sumR = 0.0
-                var sumI = 0.0
-                let dphase = twopi * freq / internalRate
-                var phase = dphase * Double(symStart)
+                let gk = freq * Double(nsps) / internalRate
+                let coeff = Float(2.0 * cos(twopi * gk / Double(nsps)))
+                var s0: Float = 0, s1: Float = 0, s2v: Float = 0
                 for i in 0..<nsps {
-                    let sample = dd[symStart + i]
-                    sumR += sample * cos(phase)
-                    sumI += sample * sin(phase)
-                    phase += dphase
+                    s0 = Float(dd[symStart + i]) + coeff * s1 - s2v
+                    s2v = s1; s1 = s0
                 }
-                s2[k][tone] = sumR * sumR + sumI * sumI
+                s2[k][tone] = Double(s1 * s1 + s2v * s2v - coeff * s1 * s2v)
             }
         }
 

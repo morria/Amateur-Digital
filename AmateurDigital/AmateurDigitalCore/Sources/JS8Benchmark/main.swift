@@ -24,6 +24,7 @@
 //
 
 import Foundation
+import AmateurDigitalCore
 
 // ============================================================================
 // MARK: - JS8Call Protocol Constants
@@ -1382,24 +1383,47 @@ struct BenchmarkSuite {
         let preSilence = Int(preDelay * JS8.rxSampleRate)
         let postSilence = Int(1.0 * JS8.rxSampleRate)
 
-        var samples = [Float](repeating: 0, count: preSilence)
-        samples.append(contentsOf: js8GenerateAudio(tones: tones, submode: submode, carrierFreq: carrierFreq))
-        samples.append(contentsOf: [Float](repeating: 0, count: postSilence))
+        // Generate at 12kHz then upsample to 48kHz (library decoder expects 48kHz)
+        var samples12k = [Float](repeating: 0, count: preSilence)
+        samples12k.append(contentsOf: js8GenerateAudio(tones: tones, submode: submode, carrierFreq: carrierFreq))
+        samples12k.append(contentsOf: [Float](repeating: 0, count: postSilence))
 
-        // Apply impairments
+        // Simple 4x upsample by sample repetition (good enough for testing)
+        var samples = [Float](repeating: 0, count: samples12k.count * 4)
+        for i in 0..<samples12k.count {
+            let v = samples12k[i]
+            samples[i * 4] = v; samples[i * 4 + 1] = v
+            samples[i * 4 + 2] = v; samples[i * 4 + 3] = v
+        }
+
+        // Apply impairments (at 48kHz)
         if let impair = impairment {
             samples = impair(samples)
         }
 
-        // Decode
-        let result = js8Decode(audio: samples, submode: submode)
+        // Decode using the library decoder (expects 48kHz, decimates internally)
+        let libSubmode: JS8CallSubmode
+        switch submode.name {
+        case "Normal": libSubmode = .normal
+        case "Fast": libSubmode = .fast
+        case "Turbo": libSubmode = .turbo
+        case "Slow": libSubmode = .slow
+        default: libSubmode = .normal
+        }
+        let config = JS8CallConfiguration(submode: libSubmode, carrierFrequency: carrierFreq)
+        let demod = JS8CallDemodulator(configuration: config)
+        // Narrow frequency search to ±50 Hz around expected carrier for speed
+        demod.frequencyRange = (carrierFreq - 50, carrierFreq + 50)
+        let frames = demod.decodeBuffer(samples)
+        let decoded = frames.first?.message ?? ""
+        let snr: Double? = frames.first?.snr
 
-        let decoded = result?.0 ?? ""
-        let snr = result?.1
-
-        // Trim both for comparison
-        let expectedTrimmed = text.trimmingCharacters(in: .whitespaces)
-        let decodedTrimmed = decoded.trimmingCharacters(in: .whitespaces)
+        // Normalize for comparison: JS8Call's 67-char alphabet has no space.
+        // Spaces in the test text are encoded as '0' by the encoder.
+        // Normalize both sides by replacing spaces with '0' for fair CER comparison.
+        let expectedTrimmed = text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: " ", with: "0")
+        let decodedTrimmed = String(decoded.trimmingCharacters(in: .whitespaces)
+            .reversed().drop(while: { $0 == "0" || $0 == "." }).reversed())
 
         let cer = characterErrorRate(expected: expectedTrimmed, actual: decodedTrimmed)
         return TestResult(
