@@ -296,7 +296,8 @@ public struct PSKModulator {
         var samples = [Float]()
 
         // Calculate preamble/postamble in symbols
-        let preambleSymbols = max(4, Int(preambleMs / 1000.0 * configuration.baudRate))
+        // Minimum 6 preamble symbols: 4 for AFC warmup + 2 margin for first character
+        let preambleSymbols = max(6, Int(preambleMs / 1000.0 * configuration.baudRate))
         let postambleSymbols = max(2, Int(postambleMs / 1000.0 * configuration.baudRate))
 
         // Ramp-up envelope (first few symbols)
