@@ -404,8 +404,8 @@ public final class CWDemodulator {
                 let keyDownBlocks = stateDurationBlocks
                 lastToneDuration = keyDownBlocks
 
-                // Reject noise spikes shorter than 60% of a dit (use ceiling)
-                let minBlocks = max(4, Int(ceil(ditBlocks * 0.6)))
+                // Reject noise spikes shorter than 1/3 of a dit
+                let minBlocks = max(2, Int(ditBlocks / 3))
                 if keyDownBlocks >= minBlocks {
                     classifyElement(durationBlocks: keyDownBlocks)
                 }
@@ -422,9 +422,8 @@ public final class CWDemodulator {
             if toneOn {
                 let gapBlocks = stateDurationBlocks
 
-                // Debounce: gaps shorter than 60% of a dit are noise artifacts
-                // (splits a dash mid-element when noise briefly dips below threshold)
-                let debounceThreshold = max(3, Int(ceil(ditBlocks * 0.6)))
+                // Debounce: gaps shorter than ~40% of a dit are noise artifacts
+                let debounceThreshold = max(2, Int(ditBlocks * 0.4))
                 if gapBlocks < debounceThreshold {
                     // Undo the element that was classified when we entered afterTone
                     if !currentElements.isEmpty {
