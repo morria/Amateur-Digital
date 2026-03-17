@@ -55,7 +55,9 @@ public final class JS8CallDemodulator {
     private let decimFactor = JS8CallConstants.decimationFactor
 
     /// Background queue for CPU-intensive decode work.
-    private let decodeQueue = DispatchQueue(label: "com.amateurdigital.js8call", qos: .userInitiated)
+    /// Uses .utility QoS to avoid starving the UI thread during the Goertzel sync search
+    /// which can peg a core at 100% for 10-20 seconds.
+    private let decodeQueue = DispatchQueue(label: "com.amateurdigital.js8call", qos: .utility)
     private var isDecodeRunning = false
 
     /// Tracking decode cycle boundaries (UTC-aligned)
