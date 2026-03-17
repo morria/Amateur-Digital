@@ -233,6 +233,10 @@ public final class PSKDemodulator {
     /// Symbols of signal detection before AFC engages
     private let afcWarmupSymbols: Int = 4
 
+    /// Buffer IQ values during warmup for retroactive decode after AFC locks
+    private var warmupSymbolsI: [Double] = []
+    private var warmupSymbolsQ: [Double] = []
+
     /// Number of symbols to average before applying an AFC correction
     private let afcAveragingWindow: Int = 4
 
@@ -820,6 +824,8 @@ public final class PSKDemodulator {
         afcPreambleI.removeAll()
         afcPreambleQ.removeAll()
         afcPreambleSampleCount = 0
+        warmupSymbolsI.removeAll()
+        warmupSymbolsQ.removeAll()
         varicodeCodec.reset()
         bandpassFilter.reset()
         fftBandpassFilter.reset()
