@@ -334,9 +334,8 @@ class ModemService: ObservableObject {
         self.cwModem = CWModem(configuration: currentCWConfiguration)
         self.cwModem?.delegate = self
 
-        // Create JS8Call modem
-        self.js8callModem = JS8CallModem(configuration: .normal)
-        self.js8callModem?.delegate = self
+        // JS8Call modem: lazy-initialized on first use (11.5MB ring buffer allocation)
+        // Don't create during app launch — wait until user selects JS8Call mode.
         #else
         print("[ModemService] DigiModesCore not available - running in placeholder mode")
         // Setup default channel frequencies for placeholder mode

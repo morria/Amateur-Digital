@@ -63,8 +63,8 @@ public final class JS8CallDemodulator {
 
     public init(configuration: JS8CallConfiguration = .standard) {
         self.currentConfiguration = configuration
-        let ringSize = Self.ringBufferSeconds * Int(configuration.sampleRate)
-        self.ringBuffer = [Float](repeating: 0, count: ringSize)
+        // Ring buffer is allocated lazily on first process() call to avoid
+        // blocking app launch with an 11.5MB allocation.
     }
 
     // MARK: - UTC Time Alignment
@@ -88,6 +88,11 @@ public final class JS8CallDemodulator {
     /// Process incoming audio samples at the external sample rate (48 kHz).
     /// Writes into a ring buffer and triggers decode at UTC period boundaries.
     public func process(samples: [Float]) {
+        // Lazy ring buffer allocation (11.5MB — don't allocate during app launch)
+        if ringBuffer.isEmpty {
+            let ringSize = Self.ringBufferSeconds * Int(currentConfiguration.sampleRate)
+            ringBuffer = [Float](repeating: 0, count: ringSize)
+        }
         let ringSize = ringBuffer.count
 
         // Initialize ring buffer write position based on UTC on first call

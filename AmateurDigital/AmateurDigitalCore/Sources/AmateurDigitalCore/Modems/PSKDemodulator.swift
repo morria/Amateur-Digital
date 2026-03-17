@@ -116,8 +116,17 @@ public final class PSKDemodulator {
     /// IIR bandpass filter for out-of-band noise rejection (~40 dB)
     private var bandpassFilter: BandpassFilter
 
-    /// FFT-based FIR bandpass for deep rejection (~73 dB)
-    private var fftBandpassFilter: OverlapAddFilter
+    /// FFT-based FIR bandpass for deep rejection (~73 dB).
+    /// Lazy: not created at init to avoid FFT computation on app launch.
+    private lazy var fftBandpassFilter: OverlapAddFilter = {
+        let margin = max(50.0, configuration.baudRate * 1.5)
+        return OverlapAddFilter.bandpass(
+            lowCutoff: configuration.centerFrequency - margin,
+            highCutoff: configuration.centerFrequency + margin,
+            sampleRate: configuration.sampleRate,
+            taps: 257
+        )
+    }()
 
     // MARK: - AGC Properties
 
@@ -258,13 +267,7 @@ public final class PSKDemodulator {
             sampleRate: configuration.sampleRate
         )
 
-        // FFT-based FIR bandpass for deep rejection (-73 dB)
-        self.fftBandpassFilter = OverlapAddFilter.bandpass(
-            lowCutoff: configuration.centerFrequency - margin,
-            highCutoff: configuration.centerFrequency + margin,
-            sampleRate: configuration.sampleRate,
-            taps: 257
-        )
+        // Note: fftBandpassFilter is lazy-initialized (not created here)
     }
 
     /// IIR filter coefficient, computed from baud rate and sample rate.
@@ -279,9 +282,10 @@ public final class PSKDemodulator {
     /// Process a buffer of audio samples
     /// - Parameter samples: Audio samples to process
     public func process(samples: [Float]) {
-        // Apply FFT bandpass filter to entire buffer first (efficient block processing)
-        let fftFiltered = fftBandpassFilter.process(samples)
-        for sample in fftFiltered {
+        // Use IIR bandpass (low latency, no FFT overhead on audio thread).
+        // The OverlapAddFilter is available but too expensive for real-time use
+        // without Accelerate/vDSP optimization.
+        for sample in samples {
             processSample(sample)
         }
     }
