@@ -49,3 +49,5 @@ research/FT4_FT8_QEX.pdf
 research/WSJT-X/
 research/fldigi/
 research/js8call/
+*.trace
+*.trace
