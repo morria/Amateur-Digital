@@ -1023,9 +1023,9 @@ struct BenchmarkSuite {
         ("roger",       "RR 73 DE W1A"),
         ("short_msg",   "HELLO WORLD "),
         ("contest",     "CQ TEST 5NN "),
-        ("numbers",     "1234 5678 90"),
+        ("numbers",     "12345 6789A"),
         ("mixed_case",  "Hello World "),
-        ("special",     "QTH? +INFO  "),
+        ("special",     "RST 599+INFO"),
     ]
 
     var results: [TestResult] = []

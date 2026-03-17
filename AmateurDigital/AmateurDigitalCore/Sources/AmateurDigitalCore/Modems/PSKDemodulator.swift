@@ -231,7 +231,8 @@ public final class PSKDemodulator {
     private let afcMaxCorrectionHz: Double = 60.0
 
     /// Symbols of signal detection before AFC engages
-    private let afcWarmupSymbols: Int = 4
+    /// AFC warmup: fewer symbols for BPSK (simpler phase), more for QPSK
+    private var afcWarmupSymbols: Int { configuration.modulationType == .bpsk ? 2 : 4 }
 
     /// Buffer IQ values during warmup for retroactive decode after AFC locks
     private var warmupSymbolsI: [Double] = []
