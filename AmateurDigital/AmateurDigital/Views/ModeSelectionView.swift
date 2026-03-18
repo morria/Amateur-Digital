@@ -42,7 +42,18 @@ struct ModeSelectionView: View {
                     LazyVGrid(columns: columns, spacing: 16) {
                         ForEach(ModeConfig.allEnabledModes) { mode in
                             ModeCard(mode: mode, isSelected: false) {
-                                navigationPath.append(mode)
+                                if mode == .cw {
+                                    // CW skips channel list — go straight to single conversation
+                                    viewModel.selectedMode = .cw
+                                    Task {
+                                        await viewModel.startAudioService()
+                                    }
+                                    let channel = viewModel.getOrCreateComposeChannel()
+                                    navigationPath.append(mode)
+                                    navigationPath.append(channel)
+                                } else {
+                                    navigationPath.append(mode)
+                                }
                             }
                         }
                     }
