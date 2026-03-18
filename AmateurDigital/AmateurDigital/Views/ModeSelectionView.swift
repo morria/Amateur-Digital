@@ -199,33 +199,24 @@ struct ChannelListContainer: View {
     }
 
     var body: some View {
-        Group {
-            if mode == .cw {
-                // CW uses a single-pane waterfall view instead of per-frequency channels
-                CWWaterfallView()
-            } else {
-                ChannelListView()
-            }
-        }
+        ChannelListView()
             .overlay(alignment: .bottomTrailing) {
-                // Compose button - creates channel and navigates (not shown for CW waterfall)
-                if mode != .cw {
-                    Button {
-                        let channel = viewModel.getOrCreateComposeChannel()
-                        navigationPath.append(channel)
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.white)
-                            .frame(width: 56, height: 56)
-                            .background(mode.color)
-                            .clipShape(Circle())
-                            .shadow(radius: 4)
-                    }
-                    .padding(.trailing, 20)
-                    .padding(.bottom, 20)
+                // Compose button - creates channel and navigates
+                Button {
+                    let channel = viewModel.getOrCreateComposeChannel()
+                    navigationPath.append(channel)
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                        .frame(width: 56, height: 56)
+                        .background(mode.color)
+                        .clipShape(Circle())
+                        .shadow(radius: 4)
                 }
+                .padding(.trailing, 20)
+                .padding(.bottom, 20)
             }
             .toolbar {
                 ToolbarItem(placement: .principal) {

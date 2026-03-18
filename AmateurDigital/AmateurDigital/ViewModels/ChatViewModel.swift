@@ -531,9 +531,17 @@ class ChatViewModel: ObservableObject {
     private func getOrCreateChannel(at frequency: Double, for mode: DigitalMode) -> Int {
         var modeChannels = channelsByMode[mode] ?? []
 
-        // Find existing channel within ±10 Hz
-        if let index = modeChannels.firstIndex(where: { abs($0.frequency - Int(frequency)) < 10 }) {
-            return index
+        // CW mode: single channel for all frequencies.
+        // All signals go to one conversation; frequency is noted per-message.
+        if mode == .cw && !modeChannels.isEmpty {
+            return 0
+        }
+
+        if mode != .cw {
+            // Other modes: separate channel per frequency (±10 Hz tolerance)
+            if let index = modeChannels.firstIndex(where: { abs($0.frequency - Int(frequency)) < 10 }) {
+                return index
+            }
         }
 
         // Get initial squelch from global settings (convert 0.0-1.0 to 0-100)
@@ -620,18 +628,36 @@ class ChatViewModel: ObservableObject {
         // Use the mode that was active during decoding
         let messageMode = modeDecodingMode[frequency] ?? mode
 
+        // For CW single-channel mode, label messages with their frequency
+        // so the user can see which signal each decode came from.
+        let messageCallsign: String? = (mode == .cw) ? "\(Int(frequency)) Hz" : nil
+
         if canAppend,
            let lastMessageIndex = modeChannels[channelIndex].messages.indices.last {
-            // Append to existing received message
-            modeChannels[channelIndex].messages[lastMessageIndex].content += trimmedText
-            print("[ChatViewModel] RX appended on \(Int(frequency)) Hz (\(messageMode.rawValue)): \(trimmedText)")
+            // Append to existing received message (only if same frequency for CW)
+            let lastCallsign = modeChannels[channelIndex].messages[lastMessageIndex].callsign
+            if mode == .cw && lastCallsign != messageCallsign {
+                // Different frequency — start a new message instead of appending
+                let message = Message(
+                    content: trimmedText,
+                    direction: .received,
+                    mode: messageMode,
+                    callsign: messageCallsign,
+                    transmitState: nil
+                )
+                modeChannels[channelIndex].messages.append(message)
+                print("[ChatViewModel] RX new freq on CW \(Int(frequency)) Hz: \(trimmedText)")
+            } else {
+                modeChannels[channelIndex].messages[lastMessageIndex].content += trimmedText
+                print("[ChatViewModel] RX appended on \(Int(frequency)) Hz (\(messageMode.rawValue)): \(trimmedText)")
+            }
         } else {
             // Create new received message
             let message = Message(
                 content: trimmedText,
                 direction: .received,
                 mode: messageMode,
-                callsign: nil,
+                callsign: messageCallsign,
                 transmitState: nil
             )
             modeChannels[channelIndex].messages.append(message)
