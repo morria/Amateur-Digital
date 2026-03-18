@@ -43,19 +43,14 @@ struct ModeSelectionView: View {
                         ForEach(ModeConfig.allEnabledModes) { mode in
                             ModeCard(mode: mode, isSelected: false) {
                                 if mode == .cw {
-                                    // CW skips channel list — go straight to conversation
+                                    // CW: single conversation, skip channel list entirely.
+                                    // Push Channel directly — back goes to mode selection.
                                     viewModel.selectedMode = .cw
                                     Task {
                                         await viewModel.startAudioService()
                                     }
-                                    // Push mode first (required for back navigation context),
-                                    // then immediately push the channel on the next run loop
-                                    // so SwiftUI processes both navigation steps.
-                                    navigationPath.append(mode)
                                     let channel = viewModel.getOrCreateComposeChannel()
-                                    DispatchQueue.main.async {
-                                        navigationPath.append(channel)
-                                    }
+                                    navigationPath.append(channel)
                                 } else {
                                     navigationPath.append(mode)
                                 }
