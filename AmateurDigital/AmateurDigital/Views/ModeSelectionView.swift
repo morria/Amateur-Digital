@@ -48,8 +48,14 @@ struct ModeSelectionView: View {
                                     Task {
                                         await viewModel.startAudioService()
                                     }
+                                    // Push mode first (required for back navigation context),
+                                    // then immediately push the channel on the next run loop
+                                    // so SwiftUI processes both navigation steps.
+                                    navigationPath.append(mode)
                                     let channel = viewModel.getOrCreateComposeChannel()
-                                    navigationPath.append(channel)
+                                    DispatchQueue.main.async {
+                                        navigationPath.append(channel)
+                                    }
                                 } else {
                                     navigationPath.append(mode)
                                 }
