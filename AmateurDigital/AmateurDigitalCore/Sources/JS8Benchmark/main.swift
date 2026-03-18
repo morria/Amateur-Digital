@@ -1043,6 +1043,7 @@ struct BenchmarkSuite {
         runNoiseSweepTests()
         runFrequencyOffsetTests()
         runFadingTests()
+        runITUChannelTests()
         runClockOffsetTests()
         runCombinedImpairmentTests()
         runMultiSignalTests()
@@ -1157,6 +1158,50 @@ struct BenchmarkSuite {
                 submode: .normal, text: text, carrierFreq: 1000,
                 impairment: { samples in
                     applyFading(to: samples, fadeRateHz: rate, fadeDepth: depth, sampleRate: JS8.rxSampleRate)
+                }
+            )
+            results.append(result)
+            printResult(result)
+        }
+        print()
+    }
+
+    // MARK: - ITU Standard HF Channel Tests
+
+    mutating func runITUChannelTests() {
+        print("--- ITU/CCIR Standard HF Channels (Normal mode, 1000 Hz) ---")
+        let text = "CQ CQ CQ W1A"
+
+        let channels: [(name: String, channel: () -> WattersonChannel)] = [
+            ("itu_good",      { WattersonChannel.good(seed: 400) }),
+            ("itu_moderate",  { WattersonChannel.moderate(seed: 401) }),
+            ("itu_poor",      { WattersonChannel.poor(seed: 402) }),
+            ("itu_disturbed", { WattersonChannel.disturbed(seed: 403) }),
+        ]
+
+        for (name, makeChannel) in channels {
+            let result = runSingleTest(
+                category: "itu_channel", name: name,
+                submode: .normal, text: text, carrierFreq: 1000,
+                impairment: { samples in
+                    var channel = makeChannel()
+                    let faded = channel.process(samples)
+                    var rng = SeededRandom(seed: 500 + UInt64(name.count))
+                    return addWhiteNoise(to: faded, snrDB: 10, rng: &rng)
+                }
+            )
+            results.append(result)
+            printResult(result)
+        }
+
+        // Clean (no noise)
+        for (name, makeChannel) in channels {
+            let result = runSingleTest(
+                category: "itu_channel", name: "\(name)_clean",
+                submode: .normal, text: text, carrierFreq: 1000,
+                impairment: { samples in
+                    var channel = makeChannel()
+                    return channel.process(samples)
                 }
             )
             results.append(result)
@@ -1465,6 +1510,7 @@ struct BenchmarkSuite {
             "noise":          3.0,  // Noise immunity is the core value prop
             "freq_offset":    1.5,  // Frequency tolerance
             "fading":         2.5,  // QSB is the #1 HF challenge
+            "itu_channel":    2.5,  // ITU standard HF propagation
             "clock_offset":   1.5,  // Clock sync tolerance
             "combined":       3.0,  // Real-world multi-impairment
             "multi_signal":   1.5,  // Adjacent channel rejection
