@@ -43,13 +43,12 @@ struct ModeSelectionView: View {
                         ForEach(ModeConfig.allEnabledModes) { mode in
                             ModeCard(mode: mode, isSelected: false) {
                                 if mode == .cw {
-                                    // CW skips channel list — go straight to single conversation
+                                    // CW skips channel list — go straight to conversation
                                     viewModel.selectedMode = .cw
                                     Task {
                                         await viewModel.startAudioService()
                                     }
                                     let channel = viewModel.getOrCreateComposeChannel()
-                                    navigationPath.append(mode)
                                     navigationPath.append(channel)
                                 } else {
                                     navigationPath.append(mode)
