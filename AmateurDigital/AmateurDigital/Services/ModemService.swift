@@ -522,6 +522,44 @@ class ModemService: ObservableObject {
         isDecoding = false
     }
 
+    /// Ensure the modem for the active mode is created (lazy initialization).
+    /// Called on every audio buffer to handle the case where audio starts
+    /// before setMode() is called (e.g., during app launch).
+    private func ensureModemCreated() {
+        #if canImport(AmateurDigitalCore)
+        switch activeMode {
+        case .rtty:
+            if rttyModem == nil {
+                rttyModem = RTTYModem(configuration: currentRTTYConfiguration)
+                setupMultiChannelDemodulator()
+            }
+        case .psk31, .bpsk63, .qpsk31, .qpsk63:
+            if pskModem == nil {
+                pskModem = PSKModem(configuration: currentPSKConfiguration)
+                pskModem?.delegate = self
+                multiChannelPSKDemodulator = MultiChannelPSKDemodulator.standardSubband(configuration: currentPSKConfiguration)
+                multiChannelPSKDemodulator?.delegate = self
+                multiChannelPSKDemodulator?.setSquelch(Float(settings.psk31Squelch))
+                channelFrequencies = multiChannelPSKDemodulator?.channels.map { $0.frequency } ?? []
+            }
+        case .cw:
+            if cwModem == nil {
+                cwModem = CWModem(configuration: currentCWConfiguration)
+                cwModem?.delegate = self
+                channelFrequencies = [settings.cwToneFrequency]
+            }
+        case .js8call:
+            if js8callModem == nil {
+                js8callModem = JS8CallModem(configuration: .normal)
+                js8callModem?.delegate = self
+                channelFrequencies = [1000.0]
+            }
+        case .olivia, .rattlegram:
+            break
+        }
+        #endif
+    }
+
     // MARK: - Decoding (RX)
 
     /// Process incoming audio buffer for decoding
@@ -544,6 +582,9 @@ class ModemService: ObservableObject {
     /// Process raw Float array samples
     func processRxSamples(_ samples: [Float]) {
         #if canImport(AmateurDigitalCore)
+        // Ensure the modem for the active mode exists (lazy creation)
+        ensureModemCreated()
+
         switch activeMode {
         case .rtty:
             if let multiDemod = multiChannelDemodulator {
