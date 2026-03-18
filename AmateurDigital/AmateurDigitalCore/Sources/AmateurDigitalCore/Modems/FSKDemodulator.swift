@@ -543,6 +543,12 @@ public final class FSKDemodulator {
         let total = m + s
         let simpleCorrelation: Float = total > 0.001 ? (m - s) / total : 0
 
+        // Seed envelopes from first measurement to avoid warmup transient.
+        // Without this, the ATC produces wrong decisions for the first ~5 blocks
+        // while envelopes ramp from 0, causing Baudot shift code misdetection.
+        if markEnvelope < 0.001 && m > 0.001 { markEnvelope = m }
+        if spaceEnvelope < 0.001 && s > 0.001 { spaceEnvelope = s }
+
         // Update mark envelope (fast attack, slow decay)
         if m > markEnvelope {
             markEnvelope += (m - markEnvelope) * envelopeAttack
@@ -566,8 +572,8 @@ public final class FSKDemodulator {
         }
         atcNoiseFloor = max(0.0001, atcNoiseFloor)
 
-        // Use simple correlation until envelopes have converged
-        let envelopeReady = markEnvelope > total * 0.1 && spaceEnvelope > total * 0.1
+        // Use simple correlation until envelopes are meaningful
+        let envelopeReady = markEnvelope > 0.001 && spaceEnvelope > 0.001
         guard envelopeReady else {
             return polarityInverted ? -simpleCorrelation : simpleCorrelation
         }
