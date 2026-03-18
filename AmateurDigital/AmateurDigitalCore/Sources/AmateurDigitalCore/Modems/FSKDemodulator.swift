@@ -525,14 +525,9 @@ public final class FSKDemodulator {
 
     /// Analyze the sliding analysis window using the W7AY Optimal ATC detector.
     ///
-    /// The optimal ATC handles selective fading where one tone fades independently:
-    /// 1. Track mark and space envelopes (fast attack, slow decay)
-    /// 2. Track noise floor from the minimum of both channels
-    /// 3. Clip signals between noise floor and envelope
-    /// 4. Apply optimal decision: v = (m-nf)*(env_m-nf) - (s-nf)*(env_s-nf) - bias
-    ///
-    /// This automatically behaves as a mark-only or space-only demodulator during
-    /// deep selective fading, eliminating the 3 dB noise penalty of traditional ATC.
+    /// Uses simple normalized correlation during envelope warmup, then switches to
+    /// the full ATC formula once envelopes have converged. The ATC handles selective
+    /// fading where mark/space tones fade independently.
     ///
     /// Reference: http://www.w7ay.net/site/Technical/ATC/
     ///
@@ -544,53 +539,52 @@ public final class FSKDemodulator {
         markFilter.reset()
         spaceFilter.reset()
 
+        // Simple normalized correlation (always valid, no warmup needed)
+        let total = m + s
+        let simpleCorrelation: Float = total > 0.001 ? (m - s) / total : 0
+
         // Update mark envelope (fast attack, slow decay)
         if m > markEnvelope {
-            markEnvelope = markEnvelope + (m - markEnvelope) * envelopeAttack
+            markEnvelope += (m - markEnvelope) * envelopeAttack
         } else {
-            markEnvelope = markEnvelope + (m - markEnvelope) * envelopeDecay
+            markEnvelope += (m - markEnvelope) * envelopeDecay
         }
 
         // Update space envelope
         if s > spaceEnvelope {
-            spaceEnvelope = spaceEnvelope + (s - spaceEnvelope) * envelopeAttack
+            spaceEnvelope += (s - spaceEnvelope) * envelopeAttack
         } else {
-            spaceEnvelope = spaceEnvelope + (s - spaceEnvelope) * envelopeDecay
+            spaceEnvelope += (s - spaceEnvelope) * envelopeDecay
         }
 
-        // Update ATC noise floor from the minimum of both channels.
-        // The noise floor should track the quieter channel, which during
-        // selective fading is the faded-out tone.
+        // Update ATC noise floor
         let minPower = min(m, s)
         if minPower < atcNoiseFloor {
-            atcNoiseFloor = atcNoiseFloor + (minPower - atcNoiseFloor) * atcNoiseAttack
+            atcNoiseFloor += (minPower - atcNoiseFloor) * atcNoiseAttack
         } else {
-            atcNoiseFloor = atcNoiseFloor + (minPower - atcNoiseFloor) * atcNoiseDecay
+            atcNoiseFloor += (minPower - atcNoiseFloor) * atcNoiseDecay
         }
         atcNoiseFloor = max(0.0001, atcNoiseFloor)
 
-        let nf = atcNoiseFloor
+        // Use simple correlation until envelopes have converged
+        let envelopeReady = markEnvelope > total * 0.1 && spaceEnvelope > total * 0.1
+        guard envelopeReady else {
+            return polarityInverted ? -simpleCorrelation : simpleCorrelation
+        }
 
-        // Clip mark: constrain between noise floor and envelope
+        // Optimal ATC decision (W7AY)
+        let nf = atcNoiseFloor
         let mClipped = max(0, min(m - nf, markEnvelope - nf))
         let sClipped = max(0, min(s - nf, spaceEnvelope - nf))
-
-        // Noise-subtracted envelopes
         let envM = max(0, markEnvelope - nf)
         let envS = max(0, spaceEnvelope - nf)
 
-        // Optimal ATC decision (W7AY equation):
-        // v = (m_clipped * env_m) - (s_clipped * env_s) - 0.5*(env_m^2 - env_s^2)
-        // The multiplication by envelope gives more weight to the stronger channel,
-        // which is the one NOT affected by selective fading.
         let mProduct = mClipped * envM
         let sProduct = sClipped * envS
-        let mBias = 0.5 * envM * envM
-        let sBias = 0.5 * envS * envS
+        let mBias: Float = 0.5 * envM * envM
+        let sBias: Float = 0.5 * envS * envS
 
         let v = (mProduct - sProduct) - (mBias - sBias)
-
-        // Normalize to [-1, 1] range for compatibility with rest of demodulator
         let maxScale = max(mBias + sBias, 0.0001)
         let correlation = max(-1.0, min(1.0, v / maxScale))
 
