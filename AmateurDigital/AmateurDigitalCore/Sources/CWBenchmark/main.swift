@@ -226,6 +226,7 @@ struct BenchmarkSuite {
         runNoiseSweepTests()
         runFrequencyOffsetTests()
         runFadingTests()
+        runITUChannelTests()
         runTimingJitterTests()
         runDashDotRatioTests()
         runCombinedImpairmentTests()
@@ -340,6 +341,50 @@ struct BenchmarkSuite {
                 config: .standard, text: text,
                 impairment: { samples in
                     applyFading(to: samples, fadeRateHz: rate, fadeDepth: depth, sampleRate: 48000)
+                }
+            )
+            results.append(result)
+            printResult(result)
+        }
+        print()
+    }
+
+    // MARK: - ITU Standard HF Channel Tests
+
+    mutating func runITUChannelTests() {
+        print("--- ITU/CCIR Standard HF Channels (20 WPM, 15 dB SNR) ---")
+        let text = "CQ CQ DE W1AW K"
+
+        let channels: [(name: String, channel: () -> WattersonChannel)] = [
+            ("itu_good",      { WattersonChannel.good(seed: 100) }),
+            ("itu_moderate",  { WattersonChannel.moderate(seed: 101) }),
+            ("itu_poor",      { WattersonChannel.poor(seed: 102) }),
+            ("itu_disturbed", { WattersonChannel.disturbed(seed: 103) }),
+        ]
+
+        for (name, makeChannel) in channels {
+            let result = runTest(
+                category: "itu_channel", name: name,
+                config: .standard, text: text,
+                impairment: { samples in
+                    var channel = makeChannel()
+                    var faded = channel.process(samples)
+                    var rng = SeededRandom(seed: 200 + UInt64(name.hashValue & 0xFF))
+                    return addWhiteNoise(to: faded, snrDB: 15, rng: &rng)
+                }
+            )
+            results.append(result)
+            printResult(result)
+        }
+
+        // Also test without noise to isolate fading effect
+        for (name, makeChannel) in channels {
+            let result = runTest(
+                category: "itu_channel", name: "\(name)_clean",
+                config: .standard, text: text,
+                impairment: { samples in
+                    var channel = makeChannel()
+                    return channel.process(samples)
                 }
             )
             results.append(result)
@@ -678,6 +723,7 @@ struct BenchmarkSuite {
             "noise": 2.0,           // Noise immunity critical for real-world
             "freq_offset": 1.5,     // AFC for tuning tolerance
             "fading": 2.0,          // QSB is the #1 real-world challenge
+            "itu_channel": 2.5,     // ITU standard HF channels (real-world propagation)
             "jitter": 2.0,          // Hand-sent CW is the norm
             "dash_dot": 1.5,        // Real ops have variable ratios
             "combined": 2.5,        // Combined impairments = real world
