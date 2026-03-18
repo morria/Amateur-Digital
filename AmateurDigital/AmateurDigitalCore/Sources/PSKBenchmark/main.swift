@@ -216,6 +216,7 @@ struct BenchmarkSuite {
         runAllModesCleanTests()
         runBPSK63StressTests()
         runFadingChannelTests()
+        runITUChannelTests()
         runLongMessageTests()
         runNoiseOnlyFalsePositiveTest()
 
@@ -561,6 +562,51 @@ struct BenchmarkSuite {
         print()
     }
 
+    // MARK: - ITU Standard HF Channel Tests
+
+    mutating func runITUChannelTests() {
+        print("--- ITU/CCIR Standard HF Channels (PSK31, 15 dB SNR) ---")
+        let text = "CQ CQ CQ DE W1AW K"
+
+        let channels: [(name: String, channel: () -> WattersonChannel)] = [
+            ("itu_good",      { WattersonChannel.good(seed: 200) }),
+            ("itu_moderate",  { WattersonChannel.moderate(seed: 201) }),
+            ("itu_poor",      { WattersonChannel.poor(seed: 202) }),
+            ("itu_disturbed", { WattersonChannel.disturbed(seed: 203) }),
+        ]
+
+        for (name, makeChannel) in channels {
+            // With noise
+            let result = runSingleTest(
+                category: "itu_channel", name: name, mode: "PSK31",
+                config: .psk31, text: text,
+                impairment: { samples in
+                    var channel = makeChannel()
+                    let faded = channel.process(samples)
+                    var rng = SeededRandom(seed: 300 + UInt64(name.count))
+                    return addWhiteNoise(to: faded, snrDB: 15, rng: &rng)
+                }
+            )
+            results.append(result)
+            printResult(result)
+        }
+
+        // Clean (no noise) to isolate multipath effect
+        for (name, makeChannel) in channels {
+            let result = runSingleTest(
+                category: "itu_channel", name: "\(name)_clean", mode: "PSK31",
+                config: .psk31, text: text,
+                impairment: { samples in
+                    var channel = makeChannel()
+                    return channel.process(samples)
+                }
+            )
+            results.append(result)
+            printResult(result)
+        }
+        print()
+    }
+
     // MARK: - Long Message Tests
 
     mutating func runLongMessageTests() {
@@ -797,6 +843,7 @@ struct BenchmarkSuite {
             "all_modes_heavy_noise": 1.5, // Mode noise floor
             "bpsk63_stress": 1.5,   // BPSK63 under stress
             "fading": 2.0,          // HF fading is critical for real-world
+            "itu_channel": 2.5,     // ITU standard HF propagation
             "long_msg": 1.5,        // Sustained decode reliability
             "false_positive": 2.0,  // Must not decode noise as signal
         ]
