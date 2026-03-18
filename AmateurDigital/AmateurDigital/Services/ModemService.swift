@@ -322,20 +322,10 @@ class ModemService: ObservableObject {
         )
 
         #if canImport(AmateurDigitalCore)
-        // Create RTTY modem with settings from SettingsManager
-        self.rttyModem = RTTYModem(configuration: currentRTTYConfiguration)
-        setupMultiChannelDemodulator()
-
-        // Create PSK modem (default to PSK31)
-        self.pskModem = PSKModem(configuration: currentPSKConfiguration)
-        setupMultiChannelPSKDemodulator()
-
-        // Create CW modem
-        self.cwModem = CWModem(configuration: currentCWConfiguration)
-        self.cwModem?.delegate = self
-
-        // JS8Call modem: lazy-initialized on first use (11.5MB ring buffer allocation)
-        // Don't create during app launch — wait until user selects JS8Call mode.
+        // Modems are created lazily when setMode() is called.
+        // Don't create any modems during init to avoid:
+        // 1. Processing audio before the user selects a mode
+        // 2. Blocking app launch with heavy modem initialization
         #else
         print("[ModemService] DigiModesCore not available - running in placeholder mode")
         // Setup default channel frequencies for placeholder mode
@@ -369,62 +359,54 @@ class ModemService: ObservableObject {
     }
     #endif
 
-    /// Reconfigure modem with current settings (call when settings change)
+    /// Reconfigure modem with current settings (call when settings change).
+    /// Only reconfigures the active mode's modem to avoid unnecessary work.
     func reconfigureModem() {
         #if canImport(AmateurDigitalCore)
-        // Rebuild RTTY modem and multi-channel demodulator with new config
-        let rttyConfig = currentRTTYConfiguration
-        rttyModem = RTTYModem(configuration: rttyConfig)
-        rttyModem?.delegate = self
-        let rttyFrequencies = stride(from: 900.0, through: 2500.0, by: 100.0).map { $0 }
-        multiChannelDemodulator = MultiChannelRTTYDemodulator(
-            frequencies: rttyFrequencies,
-            configuration: rttyConfig
-        )
-        multiChannelDemodulator?.delegate = self
-        multiChannelDemodulator?.setSquelch(Float(settings.rttySquelch))
-
-        // Apply global polarity and offset to all RTTY channels
-        if settings.rttyPolarityInverted || settings.rttyFrequencyOffset != 0 {
-            for channel in multiChannelDemodulator?.channels ?? [] {
-                if settings.rttyPolarityInverted {
-                    multiChannelDemodulator?.setPolarity(inverted: true, forChannel: channel.id)
-                }
-                if settings.rttyFrequencyOffset != 0 {
-                    multiChannelDemodulator?.setFrequencyOffset(Double(settings.rttyFrequencyOffset), forChannel: channel.id)
-                }
-            }
-        }
-
-        // Rebuild PSK modem and multi-channel demodulator with new config
-        pskModem = PSKModem(configuration: currentPSKConfiguration)
-        pskModem?.delegate = self
-        multiChannelPSKDemodulator = MultiChannelPSKDemodulator.standardSubband(
-            configuration: currentPSKConfiguration
-        )
-        multiChannelPSKDemodulator?.delegate = self
-        multiChannelPSKDemodulator?.setSquelch(Float(settings.psk31Squelch))
-
-        // Rebuild CW modem with new config
-        cwModem = CWModem(configuration: currentCWConfiguration)
-        cwModem?.delegate = self
-
-        // Update channel frequencies for the active mode
         switch activeMode {
         case .rtty:
+            let rttyConfig = currentRTTYConfiguration
+            rttyModem = RTTYModem(configuration: rttyConfig)
+            rttyModem?.delegate = self
+            setupMultiChannelDemodulator()
+
+            if settings.rttyPolarityInverted || settings.rttyFrequencyOffset != 0 {
+                for channel in multiChannelDemodulator?.channels ?? [] {
+                    if settings.rttyPolarityInverted {
+                        multiChannelDemodulator?.setPolarity(inverted: true, forChannel: channel.id)
+                    }
+                    if settings.rttyFrequencyOffset != 0 {
+                        multiChannelDemodulator?.setFrequencyOffset(Double(settings.rttyFrequencyOffset), forChannel: channel.id)
+                    }
+                }
+            }
             channelFrequencies = multiChannelDemodulator?.channels.map { $0.frequency } ?? []
+
         case .psk31, .bpsk63, .qpsk31, .qpsk63:
+            pskModem = PSKModem(configuration: currentPSKConfiguration)
+            pskModem?.delegate = self
+            multiChannelPSKDemodulator = MultiChannelPSKDemodulator.standardSubband(
+                configuration: currentPSKConfiguration
+            )
+            multiChannelPSKDemodulator?.delegate = self
+            multiChannelPSKDemodulator?.setSquelch(Float(settings.psk31Squelch))
             channelFrequencies = multiChannelPSKDemodulator?.channels.map { $0.frequency } ?? []
+
         case .cw:
+            cwModem = CWModem(configuration: currentCWConfiguration)
+            cwModem?.delegate = self
             channelFrequencies = [settings.cwToneFrequency]
-        case .olivia:
-            break
-        case .rattlegram:
-            channelFrequencies = [1500.0]
+
         case .js8call:
             js8callModem = JS8CallModem(configuration: .normal)
             js8callModem?.delegate = self
             channelFrequencies = [1000.0]
+
+        case .olivia:
+            break
+
+        case .rattlegram:
+            channelFrequencies = [1500.0]
         }
         #endif
     }
@@ -471,7 +453,13 @@ class ModemService: ObservableObject {
         // Now configure the active mode
         switch mode {
         case .rtty:
-            // RTTY uses the existing modem, just update channel frequencies
+            // Create RTTY modem and multi-channel demodulator if not already created
+            if rttyModem == nil {
+                rttyModem = RTTYModem(configuration: currentRTTYConfiguration)
+            }
+            if multiChannelDemodulator == nil {
+                setupMultiChannelDemodulator()
+            }
             channelFrequencies = multiChannelDemodulator?.channels.map { $0.frequency } ?? []
 
         case .psk31, .bpsk63, .qpsk31, .qpsk63:
