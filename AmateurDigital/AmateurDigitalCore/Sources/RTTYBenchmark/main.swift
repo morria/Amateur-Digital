@@ -268,6 +268,7 @@ struct BenchmarkSuite {
         runAdjacentChannelTests()
         runFrequencyDriftTests()
         runFlatFadingTests()
+        runITUChannelTests()
         runCombinedImpairmentTests()
         runFalsePositiveTests()
 
@@ -462,6 +463,49 @@ struct BenchmarkSuite {
         print()
     }
 
+    // MARK: - ITU Standard HF Channel Tests
+
+    mutating func runITUChannelTests() {
+        print("--- ITU/CCIR Standard HF Channels (45.45 baud, 15 dB SNR) ---")
+        let text = "CQ CQ CQ DE W1AW K"
+
+        let channels: [(name: String, channel: () -> WattersonChannel)] = [
+            ("itu_good",      { WattersonChannel.good(seed: 300) }),
+            ("itu_moderate",  { WattersonChannel.moderate(seed: 301) }),
+            ("itu_poor",      { WattersonChannel.poor(seed: 302) }),
+            ("itu_disturbed", { WattersonChannel.disturbed(seed: 303) }),
+        ]
+
+        for (name, makeChannel) in channels {
+            let result = runTest(
+                category: "itu_channel", name: name,
+                config: .standard, text: text,
+                impairment: { samples in
+                    var channel = makeChannel()
+                    let faded = channel.process(samples)
+                    var rng = SeededRandom(seed: 400 + UInt64(name.count))
+                    return addWhiteNoise(to: faded, snrDB: 15, rng: &rng)
+                }
+            )
+            results.append(result)
+            printResult(result)
+        }
+
+        for (name, makeChannel) in channels {
+            let result = runTest(
+                category: "itu_channel", name: "\(name)_clean",
+                config: .standard, text: text,
+                impairment: { samples in
+                    var channel = makeChannel()
+                    return channel.process(samples)
+                }
+            )
+            results.append(result)
+            printResult(result)
+        }
+        print()
+    }
+
     // MARK: - Combined Impairments
 
     mutating func runCombinedImpairmentTests() {
@@ -647,6 +691,7 @@ struct BenchmarkSuite {
             "adj_channel":      2.5,   // Key test for FFT filter
             "freq_drift":       2.0,   // Key test for phase AFC
             "fading":           2.0,
+            "itu_channel":      2.5,   // ITU standard HF propagation
             "combined":         3.0,
             "false_positive":   1.5,
         ]
