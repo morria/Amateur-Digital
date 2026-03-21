@@ -247,6 +247,10 @@ public final class PSKDemodulator {
     private var warmupSymbolsI: [Double] = []
     private var warmupSymbolsQ: [Double] = []
 
+    /// Pre-warmup prev IQ (reference point for replaying warmup symbols)
+    private var preWarmupPrevI: Double = 0
+    private var preWarmupPrevQ: Double = 0
+
     /// Number of symbols to average before applying an AFC correction
     private let afcAveragingWindow: Int = 4
 
@@ -472,15 +476,27 @@ public final class PSKDemodulator {
         afcSymbolCount += 1
 
         // Phase 1: Preamble frequency estimation (during warmup)
-        // Sub-symbol IQ samples are collected in processSample at quarter-symbol rate
+        // Sub-symbol IQ samples are collected in processSample at quarter-symbol rate.
+        // Buffer symbol IQ for retroactive decode after AFC locks (non-destructive AFC).
         if afcSymbolCount <= afcWarmupSymbols {
-            // At end of warmup, estimate frequency offset from sub-symbol IQ progression
+            // Save pre-warmup prev values as reference for replay
+            if afcSymbolCount == 1 {
+                preWarmupPrevI = prevI
+                preWarmupPrevQ = prevQ
+            }
+
+            // Buffer this symbol's IQ for replay
+            warmupSymbolsI.append(currentI)
+            warmupSymbolsQ.append(currentQ)
+
+            // At end of warmup, estimate frequency offset then replay buffered symbols
             if afcSymbolCount == afcWarmupSymbols && afcPreambleI.count >= 4 {
                 estimateInitialFrequencyOffset()
+                replayWarmupSymbols()
             }
             prevI = currentI
             prevQ = currentQ
-            return  // Don't decode during warmup — it's preamble
+            return  // Don't decode during warmup — replay handles it
         }
 
 
@@ -545,6 +561,55 @@ public final class PSKDemodulator {
 
         afcPreambleI.removeAll()
         afcPreambleQ.removeAll()
+    }
+
+    /// Replay buffered warmup symbols with AFC phase correction.
+    /// De-rotates each symbol by the estimated frequency offset to recover
+    /// the first characters that would otherwise be lost during AFC warmup.
+    private func replayWarmupSymbols() {
+        guard !warmupSymbolsI.isEmpty else { return }
+
+        let samplesPerSym = Double(configuration.samplesPerSymbol)
+        let phasePerSymbol = afcPhaseCorrection * samplesPerSym
+
+        var replayPrevI = preWarmupPrevI
+        var replayPrevQ = preWarmupPrevQ
+
+        for k in 0..<warmupSymbolsI.count {
+            // De-rotate by accumulated phase error: symbol k has (k+1) periods of drift
+            let angle = -Double(k + 1) * phasePerSymbol
+            let cosA = cos(angle)
+            let sinA = sin(angle)
+            let corrI = warmupSymbolsI[k] * cosA - warmupSymbolsQ[k] * sinA
+            let corrQ = warmupSymbolsI[k] * sinA + warmupSymbolsQ[k] * cosA
+
+            if configuration.modulationType == .bpsk {
+                let dotProduct = replayPrevI * corrI + replayPrevQ * corrQ
+                let bit = dotProduct < 0
+                if let char = varicodeCodec.decode(bit: bit) {
+                    delegate?.demodulator(self, didDecode: char, atFrequency: centerFrequency)
+                }
+            } else {
+                let currentPhase = atan2(corrQ, corrI)
+                let prevPhase = atan2(replayPrevQ, replayPrevI)
+                var phaseDiff = currentPhase - prevPhase
+                while phaseDiff < 0 { phaseDiff += 2 * .pi }
+                while phaseDiff >= 2 * .pi { phaseDiff -= 2 * .pi }
+                let (b1, b0) = phaseToDibit(phaseDiff)
+                if let char1 = varicodeCodec.decode(bit: b1) {
+                    delegate?.demodulator(self, didDecode: char1, atFrequency: centerFrequency)
+                }
+                if let char2 = varicodeCodec.decode(bit: b0) {
+                    delegate?.demodulator(self, didDecode: char2, atFrequency: centerFrequency)
+                }
+            }
+
+            replayPrevI = corrI
+            replayPrevQ = corrQ
+        }
+
+        warmupSymbolsI.removeAll()
+        warmupSymbolsQ.removeAll()
     }
 
     /// Decision-directed AFC update using averaged phase error with leaky integrator

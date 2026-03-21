@@ -80,6 +80,11 @@ public final class FSKDemodulator {
     private var spaceFilter: GoertzelFilter
     private let baudotCodec: BaudotCodec
 
+    /// Noise-band Goertzel filters for spectral SNR squelch.
+    /// Placed at the midpoint between mark/space frequencies (inside the bandpass).
+    /// A real RTTY signal has negligible power at the midpoint; broadband noise does not.
+    private var noiseFilterMid: GoertzelFilter
+
     /// Bandpass filter for out-of-band noise rejection (IIR, ~40 dB)
     private var bandpassFilter: BandpassFilter
 
@@ -211,6 +216,14 @@ public final class FSKDemodulator {
     /// Last character's confidence level
     public private(set) var lastCharacterConfidence: Float = 0
 
+    // MARK: - Stop Bit Validation
+
+    /// Pending character awaiting stop bit validation.
+    /// Character emission is deferred until stop bits confirm valid framing.
+    /// This rejects noise-induced false characters that lack proper stop bits.
+    private var pendingCode: UInt8?
+    private var pendingConfidence: Float = 0
+
     // MARK: - AFC Properties
 
     /// Whether AFC (Automatic Frequency Control) is enabled
@@ -284,6 +297,15 @@ public final class FSKDemodulator {
             spaceFrequency: configuration.spaceFrequency,
             margin: 75.0,
             sampleRate: configuration.sampleRate
+        )
+
+        // Noise reference at midpoint between mark/space (inside bandpass passband).
+        // Real RTTY has low power here; broadband noise has equal power everywhere.
+        let midFreq = (configuration.markFrequency + configuration.spaceFrequency) / 2.0
+        self.noiseFilterMid = GoertzelFilter(
+            frequency: midFreq,
+            sampleRate: configuration.sampleRate,
+            blockSize: goertzelWindowSize
         )
 
         // Note: fftBandpassFilter is lazy-initialized (not created at init)
@@ -424,29 +446,54 @@ public final class FSKDemodulator {
             taps: 257
         )
 
+        // Update noise midpoint filter for spectral SNR squelch
+        let newSpaceFreq = newMarkFreq - configuration.shift
+        let midFreq = (newMarkFreq + newSpaceFreq) / 2.0
+        noiseFilterMid = GoertzelFilter(frequency: midFreq, sampleRate: configuration.sampleRate, blockSize: goertzelWindowSize)
+
         // Rebuild offset filters around new center
         initializeAFCFilters()
     }
+
+    /// Use FFT bandpass filter for -73 dB adjacent channel rejection.
+    /// More CPU-intensive than IIR; enable for single-channel or non-real-time processing.
+    public var useFFTBandpass: Bool = false
 
     // MARK: - Processing
 
     /// Process a buffer of audio samples
     /// - Parameter samples: Audio samples to process
     public func process(samples: [Float]) {
-        // Use IIR bandpass (low latency, no FFT overhead on audio thread).
-        for sample in samples {
-            processSample(sample)
+        if useFFTBandpass {
+            // FFT bandpass: -73 dB stopband rejection for superior adjacent channel filtering.
+            // Processes in blocks internally; may have slight startup latency.
+            let filtered = fftBandpassFilter.process(samples)
+            for sample in filtered {
+                processFilteredSample(sample)
+            }
+        } else {
+            // IIR bandpass: low latency, suitable for real-time audio thread.
+            for sample in samples {
+                processSample(sample)
+            }
         }
     }
 
-    /// Process a single audio sample (after FFT bandpass)
-    /// - Parameter sample: Audio sample value
-    private func processSample(_ sample: Float) {
-        // Apply IIR bandpass filter for additional rejection
-        let filteredSample = bandpassFilter.process(sample)
+    /// Process a sample already filtered by FFT bandpass (skip IIR)
+    private func processFilteredSample(_ sample: Float) {
+        let agcSample = applyAGC(sample)
+        processAGCSample(agcSample)
+    }
 
-        // Apply AGC to normalize signal level
+    /// Process a single audio sample through IIR bandpass + AGC
+    private func processSample(_ sample: Float) {
+        let filteredSample = bandpassFilter.process(sample)
         let agcSample = applyAGC(filteredSample)
+        processAGCSample(agcSample)
+    }
+
+    /// Common processing after AGC (shared by IIR and FFT paths)
+    private func processAGCSample(_ agcSample: Float) {
 
         sampleBuffer.append(agcSample)
         analysisWindow.append(agcSample)
@@ -532,12 +579,27 @@ public final class FSKDemodulator {
     /// Reference: http://www.w7ay.net/site/Technical/ATC/
     ///
     /// - Returns: Correlation value: positive = mark, negative = space
+    /// Spectral SNR: ratio of active tone power to midpoint noise power.
+    /// Smoothed to avoid dips during mark/space transitions.
+    private var spectralSNR: Float = 0
+    private var smoothedSpectralSNR: Float = 0
+
     private func analyzeBlock() -> Float {
         let m = markFilter.processBlock(analysisWindow)
         let s = spaceFilter.processBlock(analysisWindow)
+        let nMid = noiseFilterMid.processBlock(analysisWindow)
 
         markFilter.reset()
         spaceFilter.reset()
+        noiseFilterMid.reset()
+
+        // Spectral SNR: active tone power vs midpoint noise power.
+        // For real RTTY: max(m,s) >> nMid → high SNR.
+        // For broadband noise: m ≈ s ≈ nMid → SNR ≈ 1.0.
+        let activeTone = max(m, s)
+        spectralSNR = activeTone / max(nMid, 0.0001)
+        // Smooth to avoid dips during mark/space transitions
+        smoothedSpectralSNR = smoothedSpectralSNR * 0.9 + spectralSNR * 0.1
 
         // Simple normalized correlation (always valid, no warmup needed)
         let total = m + s
@@ -587,8 +649,26 @@ public final class FSKDemodulator {
 
         let mProduct = mClipped * envM
         let sProduct = sClipped * envS
-        let mBias: Float = 0.5 * envM * envM
-        let sBias: Float = 0.5 * envS * envS
+
+        // Scale ATC bias coefficient based on envelope imbalance.
+        // Full W7AY bias (0.5) is too aggressive — it corrupts Baudot shift codes
+        // when the slow-decay envelope tracker creates systematic threshold offset.
+        // Use reduced bias (0.15) for mild imbalance, ramping to 0.5 only for
+        // strong selective fading (>6 dB envelope ratio).
+        let envelopeRatio = max(envM, envS) / max(min(envM, envS), 0.0001)
+        let biasCoeff: Float
+        if envelopeRatio > 2.0 {
+            biasCoeff = 0.5   // Strong fading: full ATC
+        } else if envelopeRatio > 1.41 {
+            // 3-6 dB: linear ramp from 0.15 to 0.5
+            let t = (envelopeRatio - 1.41) / (2.0 - 1.41)
+            biasCoeff = 0.15 + t * 0.35
+        } else {
+            biasCoeff = 0.15  // Mild/no fading: reduced bias
+        }
+
+        let mBias = biasCoeff * envM * envM
+        let sBias = biasCoeff * envS * envS
 
         let v = (mProduct - sProduct) - (mBias - sBias)
         let maxScale = max(mBias + sBias, 0.0001)
@@ -707,10 +787,11 @@ public final class FSKDemodulator {
             if newSamples >= samplesPerBit {
                 // Bit complete
                 if bit >= 4 {
-                    // All 5 data bits received, move to stop bits
+                    // All 5 data bits received, move to stop bits.
+                    // Buffer the character — only emit after stop bit validation.
                     state = .inStopBits(samplesProcessed: 0, markAccumulator: 0, sampleCount: 0)
-                    // Decode and emit the character with confidence
-                    decodeAndEmit(accumulator, confidence: confidence)
+                    pendingCode = accumulator
+                    pendingConfidence = confidence
                 } else {
                     // Move to next bit
                     state = .receivingData(
@@ -738,15 +819,23 @@ public final class FSKDemodulator {
             sampleCount += 1
 
             if newSamples >= stopBitSamples {
-                // Stop bits complete
-                // Validate that stop bits were mark frequency
+                // Stop bits complete — validate framing before emitting character.
+                // Valid RTTY frames have mark (positive correlation) during stop bits.
+                // Noise produces random correlation → ~50% chance of failing this check.
                 let avgStopCorrelation = sampleCount > 0 ? markAccumulator / Float(sampleCount) : 0
 
-                if avgStopCorrelation < 0 {
-                    // Stop bits were space - framing error
-                    // Character was already emitted but may be unreliable
-                    // Future: could flag or resync here
+                // Require modestly positive mark correlation during stop bits.
+                // For clean signals, avgStopCorrelation ≈ 0.5-1.0.
+                // For noisy but valid signals, avgStopCorrelation ≈ 0.1-0.4.
+                // For noise-only, avgStopCorrelation ≈ random [-0.5, +0.5].
+                // Threshold of 0.1 rejects most noise while passing weak signals.
+                let stopBitThreshold: Float = 0.05
+                if avgStopCorrelation > stopBitThreshold, let code = pendingCode {
+                    // Good framing: emit the buffered character
+                    decodeAndEmit(code, confidence: pendingConfidence)
                 }
+                // Bad framing: suppress character.
+                pendingCode = nil
 
                 state = .waitingForStart
             } else {
@@ -765,6 +854,16 @@ public final class FSKDemodulator {
 
         // Apply squelch - suppress output if signal strength is below threshold
         guard signalStrength >= effectiveSquelchLevel else { return }
+
+        // Spectral SNR squelch: reject broadband noise at baud rates where the Goertzel
+        // window has enough frequency resolution to separate mark, space, and midpoint.
+        // At 45.45 baud (window=528, resolution=91 Hz): mark/space/midpoint are well-separated.
+        //   Real signal: spectralSNR >> 2 (active tone dominates midpoint).
+        //   Noise: spectralSNR ≈ 1.3 (all frequencies similar).
+        // At higher baud rates (≥75, window≤320): resolution is too coarse for this metric.
+        if goertzelWindowSize >= 400 {
+            guard smoothedSpectralSNR > 2.2 else { return }
+        }
 
         // Apply confidence threshold
         guard confidence >= minCharacterConfidence else { return }
@@ -789,13 +888,18 @@ public final class FSKDemodulator {
         correlationHistory.removeAll(keepingCapacity: true)
         markFilter.reset()
         spaceFilter.reset()
+        noiseFilterMid.reset()
         bandpassFilter.reset()
         fftBandpassFilter.reset()
         baudotCodec.reset()
         _signalDetected = false
         agcGain = 1.0
         noiseFloor = 0.1
+        spectralSNR = 0
+        smoothedSpectralSNR = 0
         lastCharacterConfidence = 0
+        pendingCode = nil
+        pendingConfidence = 0
         markEnvelope = 0
         spaceEnvelope = 0
         atcNoiseFloor = 0.001

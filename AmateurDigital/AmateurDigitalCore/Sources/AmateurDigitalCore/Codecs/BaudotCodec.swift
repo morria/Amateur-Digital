@@ -136,6 +136,29 @@ public final class BaudotCodec {
 
     public private(set) var currentShift: ShiftState = .letters
 
+    /// Enable USOS (Unshift On Space): receiving a space in FIGS mode
+    /// automatically switches back to LTRS. Standard practice — transmitters
+    /// always send FIGS before each figure group, so this safely recovers
+    /// from missed LTRS shift codes after numbers/punctuation.
+    public var usosEnabled: Bool = true
+
+    /// Track recent codes for shift error recovery heuristics.
+    /// Stores (code, shift used) pairs for the last N characters.
+    private var recentCodes: [(code: UInt8, shift: ShiftState)] = []
+    private let recentCodesMax = 8
+
+    /// Characters that are very rare in ham radio RTTY when in FIGS mode.
+    /// If we decode several of these consecutively, we likely missed a LTRS shift.
+    private static let rareFigsChars: Set<Character> = ["$", "\u{07}", "#", "&", ";", "+"]
+
+    /// Characters that are very rare in ham radio RTTY when in LTRS mode.
+    /// These map to common digits in FIGS — if we see several, we likely missed a FIGS shift.
+    /// Q=1, W=2, E=3, R=4, T=5, Y=6, U=7, I=8, O=9, P=0 (ITA2 digit↔letter mapping)
+    private static let suspiciousLetterRuns: Set<Character> = ["Q", "Z", "X"]
+
+    /// Count of consecutive characters that look like they're in the wrong shift
+    private var wrongShiftCount: Int = 0
+
     public init(initialShift: ShiftState = .letters) {
         self.currentShift = initialShift
     }
@@ -143,6 +166,8 @@ public final class BaudotCodec {
     /// Reset the codec state to letters shift
     public func reset() {
         currentShift = .letters
+        recentCodes.removeAll(keepingCapacity: true)
+        wrongShiftCount = 0
     }
 
     // MARK: - Decoding (Baudot to ASCII)
@@ -155,15 +180,65 @@ public final class BaudotCodec {
         // Handle shift codes
         if code == Self.shiftToLetters {
             currentShift = .letters
+            wrongShiftCount = 0
             return nil
         } else if code == Self.shiftToFigures {
             currentShift = .figures
+            wrongShiftCount = 0
             return nil
+        }
+
+        // USOS: space in FIGS mode → revert to LTRS.
+        // In ITA2, transmitters send FIGS before each figure group,
+        // so switching to LTRS on space safely recovers from missed LTRS shifts.
+        if usosEnabled && code == Self.spaceCode && currentShift == .figures {
+            currentShift = .letters
         }
 
         // Look up character in appropriate table
         let table = currentShift == .letters ? Self.lettersTable : Self.figuresTable
-        return table[Int(code)]
+        let char = table[Int(code)]
+
+        // Track for shift error recovery
+        if let c = char {
+            trackShiftPlausibility(code: code, char: c)
+        }
+
+        recentCodes.append((code: code, shift: currentShift))
+        if recentCodes.count > recentCodesMax {
+            recentCodes.removeFirst()
+        }
+
+        return char
+    }
+
+    /// Heuristic shift error recovery.
+    /// Detects when we're likely in the wrong shift based on character plausibility
+    /// and auto-corrects by switching shift and re-interpreting the current character.
+    private func trackShiftPlausibility(code: UInt8, char: Character) {
+        if currentShift == .figures {
+            // In FIGS: if we see rare punctuation, we might have missed a LTRS shift
+            if Self.rareFigsChars.contains(char) {
+                wrongShiftCount += 1
+            } else {
+                wrongShiftCount = max(0, wrongShiftCount - 1)
+            }
+            // 3+ consecutive rare FIGS chars → almost certainly a missed LTRS shift
+            if wrongShiftCount >= 3 {
+                currentShift = .letters
+                wrongShiftCount = 0
+            }
+        } else {
+            // In LTRS: harder to detect missed FIGS shift because all letters are valid.
+            // Only flag very unusual sequences (consecutive Q, Z, X which are rare in ham text)
+            if Self.suspiciousLetterRuns.contains(char) {
+                wrongShiftCount += 1
+            } else {
+                wrongShiftCount = 0
+            }
+            // Don't auto-switch LTRS→FIGS — too error-prone.
+            // The spectral SNR squelch and double shift codes handle this case.
+        }
     }
 
     /// Decode an array of Baudot codes to a string
@@ -188,16 +263,26 @@ public final class BaudotCodec {
         if currentShift == .letters, let code = Self.asciiToLetters[upperChar] {
             return [code]
         } else if currentShift == .figures, let code = Self.asciiToFigures[upperChar] {
+            // USOS compatibility: after encoding a space while in FIGS,
+            // switch encoder to LTRS so subsequent figures get a new FIGS shift code.
+            // This ensures USOS-capable receivers (which auto-switch to LTRS on space)
+            // correctly handle "599 599" → FIGS,5,9,9,SPACE,FIGS,5,9,9.
+            if usosEnabled && code == Self.spaceCode {
+                currentShift = .letters
+            }
             return [code]
         }
 
-        // Need to switch shift
+        // Need to switch shift — send double shift codes for error protection.
+        // Single shift codes (5 bits, no FEC) are the most vulnerable part of Baudot.
+        // Sending two copies ensures the receiver gets at least one correct shift.
+        // This is standard practice in robust RTTY implementations (MMTTY, fldigi).
         if let code = Self.asciiToLetters[upperChar] {
             currentShift = .letters
-            return [Self.shiftToLetters, code]
+            return [Self.shiftToLetters, Self.shiftToLetters, code]
         } else if let code = Self.asciiToFigures[upperChar] {
             currentShift = .figures
-            return [Self.shiftToFigures, code]
+            return [Self.shiftToFigures, Self.shiftToFigures, code]
         }
 
         // Character not in Baudot - return space

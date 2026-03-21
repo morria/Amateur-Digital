@@ -50,8 +50,10 @@ public final class CWDemodulator {
     private let blockSize: Int
     private var sampleBuffer: [Float] = []
 
-    /// Bandpass filter centered on the CW tone to reject out-of-band noise
-    private var bandpassFilter: BandpassFilter
+    /// Narrow FFT bandpass filter centered on the CW tone for noise rejection.
+    /// OverlapAddFilter provides -73 dB stopband rejection vs ~-12 dB from IIR biquad,
+    /// dramatically reducing false tone detections from out-of-band noise.
+    private var fftBandpassFilter: OverlapAddFilter
 
     // MARK: - Adaptive Threshold
 
@@ -163,11 +165,14 @@ public final class CWDemodulator {
 
         self.morseCodec = MorseCodec()
 
-        // Bandpass filter: ±100 Hz around the CW tone to reject out-of-band noise
-        self.bandpassFilter = BandpassFilter(
+        // FFT bandpass filter: ±100 Hz around the CW tone with -73 dB stopband rejection.
+        // 513 taps gives ~374 Hz transition band → -73 dB at ±474 Hz from center.
+        // Much better than the IIR biquad's ~-12 dB at ±200 Hz.
+        self.fftBandpassFilter = OverlapAddFilter.bandpass(
             lowCutoff: configuration.toneFrequency - 100,
             highCutoff: configuration.toneFrequency + 100,
-            sampleRate: configuration.sampleRate
+            sampleRate: configuration.sampleRate,
+            taps: 513
         )
 
         // AFC filters: ±250 Hz in 25 Hz steps for finer tracking
@@ -196,18 +201,31 @@ public final class CWDemodulator {
     private var rawSampleBuffer: [Float] = []
 
     public func process(samples: [Float]) {
-        for sample in samples {
-            // Apply bandpass filter to reject out-of-band noise for main detector
-            let filtered = bandpassFilter.process(sample)
-            sampleBuffer.append(filtered)
-            rawSampleBuffer.append(sample)
-            if sampleBuffer.count >= blockSize {
-                let filteredBlock = Array(sampleBuffer.prefix(blockSize))
-                let rawBlock = Array(rawSampleBuffer.prefix(blockSize))
-                sampleBuffer.removeFirst(blockSize)
+        // Apply narrow FFT bandpass to entire batch for superior noise rejection.
+        // The filter handles internal buffering and may output fewer samples than input
+        // during the initial fill, which is fine since the first 200ms is noise estimation.
+        let filtered = fftBandpassFilter.process(samples)
+
+        // Buffer raw samples for AFC (unfiltered, so AFC can detect off-frequency signals)
+        rawSampleBuffer.append(contentsOf: samples)
+
+        // Buffer filtered samples for the main Goertzel detector
+        sampleBuffer.append(contentsOf: filtered)
+
+        // Process blocks when we have enough filtered samples
+        while sampleBuffer.count >= blockSize {
+            let filteredBlock = Array(sampleBuffer.prefix(blockSize))
+            sampleBuffer.removeFirst(blockSize)
+
+            let rawBlock: [Float]
+            if rawSampleBuffer.count >= blockSize {
+                rawBlock = Array(rawSampleBuffer.prefix(blockSize))
                 rawSampleBuffer.removeFirst(blockSize)
-                processBlock(filteredBlock, rawBlock: rawBlock)
+            } else {
+                rawBlock = filteredBlock
             }
+
+            processBlock(filteredBlock, rawBlock: rawBlock)
         }
     }
 
@@ -620,10 +638,11 @@ public final class CWDemodulator {
             sampleRate: configuration.sampleRate,
             blockSize: blockSize
         )
-        bandpassFilter = BandpassFilter(
+        fftBandpassFilter = OverlapAddFilter.bandpass(
             lowCutoff: currentToneFrequency - 100,
             highCutoff: currentToneFrequency + 100,
-            sampleRate: configuration.sampleRate
+            sampleRate: configuration.sampleRate,
+            taps: 513
         )
         for i in 0..<afcFilters.count {
             afcFilters[i] = GoertzelFilter(
@@ -659,7 +678,7 @@ public final class CWDemodulator {
         _signalDetected = false
         toneBlocksSeen = 0
         morseCodec.reset()
-        bandpassFilter.reset()
+        fftBandpassFilter.reset()
         afcBlockCount = 0
         afcCenterAccum = 0
         for i in 0..<afcAccumulators.count { afcAccumulators[i] = 0 }

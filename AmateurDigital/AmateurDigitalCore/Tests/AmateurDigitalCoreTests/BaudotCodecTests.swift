@@ -97,8 +97,8 @@ final class BaudotCodecTests: XCTestCase {
     func testEncodeFiguresRequiresShift() {
         codec = BaudotCodec(initialShift: .letters)
         let codes = codec.encode("5")
-        // Should be: FIGS shift (0x1B), then 5 (0x10)
-        XCTAssertEqual(codes, [0x1B, 0x10])
+        // Should be: double FIGS shift (0x1B, 0x1B) for error protection, then 5 (0x10)
+        XCTAssertEqual(codes, [0x1B, 0x1B, 0x10])
         XCTAssertEqual(codec.currentShift, .figures)
     }
 
@@ -110,8 +110,8 @@ final class BaudotCodecTests: XCTestCase {
 
     func testEncodeStringWithMixedShifts() {
         let codes = codec.encode("A1B")
-        // A=0x03, FIGS=0x1B, 1=0x17, LTRS=0x1F, B=0x19
-        XCTAssertEqual(codes, [0x03, 0x1B, 0x17, 0x1F, 0x19])
+        // A=0x03, double FIGS=0x1B,0x1B, 1=0x17, double LTRS=0x1F,0x1F, B=0x19
+        XCTAssertEqual(codes, [0x03, 0x1B, 0x1B, 0x17, 0x1F, 0x1F, 0x19])
     }
 
     func testEncodeWithPreamble() {

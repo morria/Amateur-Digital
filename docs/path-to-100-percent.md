@@ -10,8 +10,26 @@ A detailed analysis of every failing test across all four benchmark modes, the r
 |------|-----------|-------|--------|
 | **JS8Call** | **100.0** | 82 | Perfect — no work needed |
 | **PSK** | **96.5** | 94 | 12 tests below 100% |
-| **CW** | **93.5** | 75 | 15 tests below 100% |
-| **RTTY** | **67.6** | 70 | 43 tests below 100% |
+| **CW** | **93.6** | 75 | 15 tests below 100% |
+| **RTTY** | **89.1** | 70 | 12 tests below 100% |
+
+### Recent Improvements (March 21, 2026)
+
+| Change | Mode | Impact | Details |
+|--------|------|--------|---------|
+| Stop bit validation | RTTY | +1.6 pts | Defer character emission until stop bits confirm valid framing |
+| Spectral SNR squelch | RTTY | +0.3 pts | Reject broadband noise using midpoint Goertzel (baud-rate gated) |
+| USOS (Unshift On Space) | RTTY | +0.3 pts | Auto-revert to LTRS on space for shift error recovery |
+| USOS-compatible encoder | RTTY | +0.1 pts | Re-send FIGS after spaces for USOS receiver compatibility |
+
+### Earlier Improvements (March 18, 2026)
+
+| Change | Mode | Impact | Details |
+|--------|------|--------|---------|
+| ATC bias scaling | RTTY | +9.3 pts | Reduced bias coefficient (0.15→0.5 ramp), fixed clean/noise/ITU |
+| Hilbert transform SSB shift | RTTY | +9.2 pts | Fixed frequency drift test function, freq_drift now 100/100 |
+| Double Baudot shift codes | RTTY | +0.7 pts | Encoder sends redundant shift codes for error protection |
+| FFT bandpass (OverlapAddFilter) | CW | +0.1 pts | Replaced IIR biquad with 513-tap FIR, -73 dB stopband |
 
 ---
 

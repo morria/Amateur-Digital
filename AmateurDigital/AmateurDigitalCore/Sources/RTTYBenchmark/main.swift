@@ -143,25 +143,48 @@ func applySelectiveFading(
 }
 
 func applyFrequencyDrift(to signal: [Float], driftHz: Double, sampleRate: Double = 48000) -> [Float] {
-    // True frequency shift using single-sideband mixing.
-    // For a real signal s(t), frequency shift by f produces:
-    //   s_shifted(t) = s(t) * cos(phi(t)) - s_hilbert(t) * sin(phi(t))
-    // where phi(t) is the accumulated phase.
-    // For simplicity and to avoid Hilbert transform, we use cos mixing only
-    // which creates both sidebands but preserves the signal at the shifted frequency.
-    // This is acceptable for narrowband FSK signals where the image sideband is
-    // well separated from the mark/space frequencies.
+    // True SSB frequency shift using Hilbert transform.
+    // For a real signal s(t), the analytic signal is s_a(t) = s(t) + j*H[s(t)]
+    // Frequency shift: s_shifted(t) = Re{s_a(t) * exp(j*phi(t))}
+    //                                = s(t)*cos(phi(t)) - H[s(t)]*sin(phi(t))
+    // This produces a clean single-sideband shift without the image sideband
+    // artifact that cosine-only mixing creates.
     let n = signal.count
+
+    // Compute Hilbert transform via FFT:
+    // 1. FFT the signal
+    // 2. Zero negative frequencies, double positive frequencies
+    // 3. IFFT → imaginary part is the Hilbert transform
+    let fftSize = FFTProcessor.nextPow2(n)
+    var re = [Double](repeating: 0, count: fftSize)
+    var im = [Double](repeating: 0, count: fftSize)
+    for i in 0..<n { re[i] = Double(signal[i]) }
+
+    FFTProcessor.fft(&re, &im)
+
+    // Build analytic signal: zero negative frequencies, double positive
+    // DC and Nyquist stay as-is; positive freqs doubled; negative freqs zeroed
+    let half = fftSize / 2
+    for i in 1..<half {
+        re[i] *= 2.0; im[i] *= 2.0
+    }
+    for i in (half + 1)..<fftSize {
+        re[i] = 0; im[i] = 0
+    }
+
+    FFTProcessor.fft(&re, &im, inverse: true)
+    // re[] = original signal, im[] = Hilbert transform
+
+    // Apply SSB frequency shift with linear drift
     var result = [Float](repeating: 0, count: n)
     var phase = 0.0
     for i in 0..<n {
-        // Linear drift: frequency offset ramps from 0 to driftHz over the signal
         let t = Double(i) / Double(n)
         let instantOffset = driftHz * t
         let phaseInc = 2.0 * .pi * instantOffset / sampleRate
         phase += phaseInc
-        // Multiply by cos shifts the signal by ±instantOffset Hz (creates both sidebands)
-        result[i] = signal[i] * Float(cos(phase))
+        // SSB shift: s(t)*cos(φ) - H[s(t)]*sin(φ)
+        result[i] = Float(re[i] * cos(phase) - im[i] * sin(phase))
     }
     return result
 }
