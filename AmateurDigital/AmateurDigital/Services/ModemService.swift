@@ -437,7 +437,16 @@ class ModemService: ObservableObject, @unchecked Sendable {
                 if cwDecoderType == "bayesian" {
                     cwModem = nil
                     bayesianCWDecoder = BayesianCWDecoder(configuration: cwConfig)
-                    bayesianCWDecoder?.delegate = self
+                    bayesianCWDecoder?.onCharacterDecoded = { [weak self] char, freq in
+                        self?.pendingChars.append((char, freq, .cw, self?.bayesianCWDecoder?.signalStrength ?? 0))
+                    }
+                    bayesianCWDecoder?.onSignalDetected = { [weak self] detected, freq in
+                        DispatchQueue.main.async {
+                            guard let self else { return }
+                            self.isDecoding = detected
+                            self.delegate?.modemService(self, signalDetected: detected, onChannel: freq, mode: .cw)
+                        }
+                    }
                 } else {
                     bayesianCWDecoder = nil
                     cwModem = CWModem(configuration: cwConfig)
@@ -551,7 +560,16 @@ class ModemService: ObservableObject, @unchecked Sendable {
             case .cw:
                 if cwDecoderType == "bayesian" {
                     bayesianCWDecoder = BayesianCWDecoder(configuration: cwConfig)
-                    bayesianCWDecoder?.delegate = self
+                    bayesianCWDecoder?.onCharacterDecoded = { [weak self] char, freq in
+                        self?.pendingChars.append((char, freq, .cw, self?.bayesianCWDecoder?.signalStrength ?? 0))
+                    }
+                    bayesianCWDecoder?.onSignalDetected = { [weak self] detected, freq in
+                        DispatchQueue.main.async {
+                            guard let self else { return }
+                            self.isDecoding = detected
+                            self.delegate?.modemService(self, signalDetected: detected, onChannel: freq, mode: .cw)
+                        }
+                    }
                 } else {
                     cwModem = CWModem(configuration: cwConfig)
                     cwModem?.delegate = self
@@ -653,7 +671,16 @@ class ModemService: ObservableObject, @unchecked Sendable {
             if cwModem == nil && bayesianCWDecoder == nil, let config = cachedCWConfig {
                 if dspCWDecoderType == "bayesian" {
                     bayesianCWDecoder = BayesianCWDecoder(configuration: config)
-                    bayesianCWDecoder?.delegate = self
+                    bayesianCWDecoder?.onCharacterDecoded = { [weak self] char, freq in
+                        self?.pendingChars.append((char, freq, .cw, self?.bayesianCWDecoder?.signalStrength ?? 0))
+                    }
+                    bayesianCWDecoder?.onSignalDetected = { [weak self] detected, freq in
+                        DispatchQueue.main.async {
+                            guard let self else { return }
+                            self.isDecoding = detected
+                            self.delegate?.modemService(self, signalDetected: detected, onChannel: freq, mode: .cw)
+                        }
+                    }
                 } else {
                     cwModem = CWModem(configuration: config)
                     cwModem?.delegate = self
@@ -1337,27 +1364,6 @@ extension ModemService: CWModemDelegate {
     }
 }
 
-// MARK: - BayesianCWDecoderDelegate
-
-extension ModemService: BayesianCWDecoderDelegate {
-    nonisolated func bayesianDecoder(
-        _ decoder: BayesianCWDecoder,
-        didDecode character: Character,
-        atFrequency frequency: Double
-    ) {
-        pendingChars.append((character, frequency, .cw, decoder.signalStrength))
-    }
-
-    nonisolated func bayesianDecoder(
-        _ decoder: BayesianCWDecoder,
-        signalDetected detected: Bool,
-        atFrequency frequency: Double
-    ) {
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.isDecoding = detected
-            self.delegate?.modemService(self, signalDetected: detected, onChannel: frequency, mode: .cw)
-        }
-    }
-}
+// BayesianCWDecoder uses closure callbacks (onCharacterDecoded, onSignalDetected)
+// wired up at creation time above — no delegate extension needed.
 #endif
