@@ -114,6 +114,7 @@ Living document tracking three workstreams: decoder quality, evaluation harness 
 - Lower threshold fractions (hurt ITU channel without helping QRM)
 - Noise floor tracking during brief gaps (raised noise estimate, hurt fading)
 - Dual-Goertzel interference cancellation via AFC (AFC can't distinguish our signal from interferer — subtracted our own tone, 90.5→23.5)
+- Post-Goertzel IIR smoothing (blurs on/off transitions; 33 ms time constant vs 60 ms dit = elements unrecognizable, 90.5→10.8)
 
 ### JS8Call Decoder (100.0/100)
 
@@ -138,18 +139,18 @@ Perfect score across 82 tests. LDPC(174,91) error correction makes it extremely 
 |-----------|--------|---------------|--------|
 | **Auroral flutter** (10-100 Hz Doppler) | Destroys narrowband modes on polar paths | RTTY, PSK, CW | RTTY TESTED: 80.6/100 (72-78% per test, noise helps via stochastic resonance). PSK/CW NOT TESTED |
 | **NVIS O/X mode splitting** (2-path, 0.5-2 ms delay) | Deep slow fades on 80m/60m | RTTY, PSK | NOT TESTED |
-| **Narrowband interference within passband** (carrier at midpoint) | Tests spectral selectivity | RTTY, CW | NOT TESTED |
+| **Narrowband interference within passband** (carrier at midpoint) | Tests spectral selectivity | RTTY, CW | RTTY TESTED: **40.3/100** — midpoint carrier (0%) kills spectral SNR metric; near-tone carriers (78-83%) degrade but decode |
 | **AGC pumping** (10 dB sinusoidal gain, 2-5 Hz) | Simulates nearby strong station keying | All | RTTY TESTED: 100% (FSK is amplitude-independent). PSK/CW NOT TESTED |
 | **Sample rate mismatch** (48000 vs 47950 Hz) | Common with cheap USB audio | All | RTTY TESTED: 100% (50 ppm tolerated). PSK/CW NOT TESTED |
-| **Wrong sideband** (RTTY LSB/USB swap) | Common operator error | RTTY | NOT TESTED |
-| **CW chirp** (30 Hz shift on key-down) | Older/simpler transmitters | CW | NOT TESTED |
+| **Wrong sideband** (RTTY LSB/USB swap) | Common operator error | RTTY | TESTED: 16.7% inverted (garbage "AQAQAQ"), 100% normal. Decoder has `polarityInverted` flag but no auto-detection |
+| **CW chirp** (30 Hz shift on key-down) | Older/simpler transmitters | CW | TESTED: 73.3% (all severity levels identical — loses first word, rest correct) |
 | **Real-world recordings** (WebSDR + fldigi ground truth) | The ultimate validation | All | NOT SET UP |
 
 ### Harness Architecture Improvements Needed
 
 | Improvement | Impact | Status |
 |------------|--------|--------|
-| **`--params` CLI flag** on all benchmarks (for automated optimization) | Enables Layer 1 optimization | NOT IMPLEMENTED |
+| **`--params` CLI flag** on all benchmarks (for automated optimization) | Enables Layer 1 optimization | **RTTY DONE** (correlationThreshold, stopBitThreshold). PSK/CW TODO |
 | **WSJT-X style SNR sweep** (1000 trials per SNR point, report decode probability) | Gold-standard methodology | NOT IMPLEMENTED |
 | **CI benchmark regression gate** (fail PR if score drops) | Prevents regressions in normal development | NOT IMPLEMENTED |
 | **Property-based tests** (SwiftCheck: round-trip, monotonicity, frequency invariance) | Catches edge cases | NOT IMPLEMENTED |
@@ -217,8 +218,17 @@ Layer 3: Agentic Algorithm Improvement (Claude Code /improve-decoders)
 | 20 | Bench | RTTY auroral flutter | +4 tests, 80.6/100 | 10-50 Hz Doppler degrades to 72-78%. Non-monotonic: noise helps via stochastic resonance |
 | **21** | **Decoder** | **RTTY hybrid correlation** | **+1.2 composite (92.5→93.7)** | **Hybrid simple+ATC: use ATC when signal confirmed (SNR>5) and agrees with simple. +12.5 auroral, +5.6 selective_fading** |
 | 22 | Bench | RTTY AGC pumping + sample rate | +3 tests, all 100% | FSK is amplitude-independent; decoder handles 15 dB AGC pumping and 50 ppm clock error |
+| 23 | Decoder | CW post-Goertzel smoothing | 0/1 — catastrophic (10.8) | IIR on block output blurs on/off transitions. 33 ms time constant vs 60 ms dit = elements unrecognizable |
+| 24 | Bench | RTTY narrowband interference | +4 tests, 40.3/100 | **Critical flaw found**: midpoint carrier kills spectral SNR metric → snrConfidence=0 → total decode failure |
+| 25 | Decoder | RTTY narrowband_qrm fix | 0/2 — min(nMid,(m+s)/2) capped SNR at 2.0; carrier bypass triggered on noise | Midpoint carrier vulnerability requires a different noise detection approach (not midpoint-based) |
+| 26 | Bench | RTTY wrong sideband | +2 tests, 58.3/100 | Inverted polarity produces garbage "AQAQAQ" (16.7%). Auto-detection would need pattern analysis on decoded text |
+| 27 | Decoder | PSK AFC warmup 2→3 | 0/1 — +15/+20 Hz improved but +30/+50 Hz crashed | Phase wrapping: 3 symbols × 30 Hz = 2.9 cycles, too many for unwrapping. 2 symbols is optimal. |
+| 28 | Bench | CW chirp tests | +3 tests, 73.3/100 | All severity levels (15-50 Hz) identical output — loses first word only. CW composite 89.6 |
+| 29 | Infra | RTTY --params CLI flag | Done | `swift run RTTYBenchmark -- --params /path/to/params.json` enables Optuna/CMA-ES optimization |
+| 30 | Infra | Optuna optimization script | Done | `python3 scripts/optimize_rtty.py --trials 100` explores parameter space automatically |
+| 31 | Decoder | RTTY parameter sweep | No improvement | correlationThreshold 0.20 is optimal (±0.05 loses ~1 point). stopBitThreshold is insensitive (0.02-0.10 all identical). Parameters confirmed at local optimum. |
 
-### Key Principles (Learned Over 22 Iterations)
+### Key Principles (Learned Over 31 Iterations)
 
 1. **Algorithmic changes >> parameter tweaks.** The only committed decoder improvement was replacing an algorithm (ATC → simple correlation). All ~20 parameter tweaks caused regressions.
 

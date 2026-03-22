@@ -130,8 +130,11 @@ public final class FSKDemodulator {
         max(16, configuration.samplesPerBit / stateStepSize)
     }
 
-    /// Threshold for mark/space decision
-    private let correlationThreshold: Float = 0.2
+    /// Threshold for mark/space decision (configurable for optimization)
+    public var correlationThreshold: Float = 0.2
+
+    /// Stop bit validation threshold (configurable for optimization)
+    public var stopBitThreshold: Float = 0.05
 
     // MARK: - AGC Properties
 
@@ -854,7 +857,7 @@ public final class FSKDemodulator {
                 // For noisy but valid signals, avgStopCorrelation ≈ 0.1-0.4.
                 // For noise-only, avgStopCorrelation ≈ random [-0.5, +0.5].
                 // Threshold of 0.1 rejects most noise while passing weak signals.
-                let stopBitThreshold: Float = 0.05
+                let stopBitThreshold = self.stopBitThreshold
                 if avgStopCorrelation > stopBitThreshold, let code = pendingCode {
                     // Good framing: emit the buffered character
                     decodeAndEmit(code, confidence: pendingConfidence)

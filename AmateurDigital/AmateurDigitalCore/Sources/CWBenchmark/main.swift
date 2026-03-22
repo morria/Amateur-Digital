@@ -110,6 +110,53 @@ func addCWInterference(to signal: [Float], offsetHz: Double, relativeLevel: Floa
     }
 }
 
+/// Generate CW with chirp: frequency shifts on key-down then settles.
+/// Simulates older transmitters with poor oscillator stability.
+/// - `chirpHz`: frequency shift at key-down (positive = upward chirp)
+/// - `chirpDecayMs`: exponential decay time constant
+func generateChirpyCW(text: String, config: CWConfiguration,
+                       chirpHz: Double, chirpDecayMs: Double) -> [Float] {
+    let timings = MorseCodec.encodeToTimings(text)
+    let sampleRate = config.sampleRate
+    let ditDuration = MorseCodec.ditDuration(forWPM: config.wpm)
+    let baseFreq = config.toneFrequency
+    var phase = 0.0
+    let riseTimeSamples = Int(0.005 * sampleRate)  // 5ms rise/fall
+    let decaySamples = chirpDecayMs * sampleRate / 1000.0
+
+    var samples = [Float]()
+
+    for timing in timings {
+        let baseDurationUnits = abs(timing)
+        let baseDuration = Double(baseDurationUnits) * ditDuration
+        let sampleCount = Int(baseDuration * sampleRate)
+        let toneOn = timing > 0
+
+        for i in 0..<sampleCount {
+            if toneOn {
+                // Chirp: frequency starts at baseFreq + chirpHz and decays to baseFreq
+                let chirpOffset = chirpHz * exp(-Double(i) / decaySamples)
+                let freq = baseFreq + chirpOffset
+                let phaseInc = 2.0 * .pi * freq / sampleRate
+                phase += phaseInc
+
+                // Raised cosine envelope for rise/fall
+                var envelope: Float = 1.0
+                if i < riseTimeSamples {
+                    envelope = Float(0.5 * (1.0 - cos(.pi * Double(i) / Double(riseTimeSamples))))
+                } else if i > sampleCount - riseTimeSamples {
+                    let fadeIdx = i - (sampleCount - riseTimeSamples)
+                    envelope = Float(0.5 * (1.0 + cos(.pi * Double(fadeIdx) / Double(riseTimeSamples))))
+                }
+                samples.append(Float(sin(phase)) * envelope * 0.8)
+            } else {
+                samples.append(0)
+            }
+        }
+    }
+    return samples
+}
+
 func applyTimingJitter(to text: String, config: CWConfiguration, jitterFraction: Double, rng: inout SeededRandom) -> [Float] {
     // Generate CW with random timing variation per element
     // jitterFraction: 0.0 = perfect timing, 0.3 = ±30% timing variation
@@ -247,6 +294,7 @@ struct BenchmarkSuite {
         runCombinedImpairmentTests()
         runLongMessageTests()
         runQRMTests()
+        runChirpTests()
         runFalsePositiveTest()
 
         printSummary()
@@ -613,6 +661,51 @@ struct BenchmarkSuite {
         print()
     }
 
+    // MARK: - Chirp Tests
+
+    mutating func runChirpTests() {
+        print("--- Chirp Tests (transmitter frequency shift on key-down) ---")
+        let text = "CQ CQ DE W1AW K"
+
+        // Mild chirp: 15 Hz upward shift, 5 ms decay (modern rig with slight instability)
+        let chirpSamples1 = generateChirpyCW(text: text, config: .standard,
+                                              chirpHz: 15, chirpDecayMs: 5)
+        let demod1 = CWDemodulator(configuration: .standard)
+        delegate.reset()
+        demod1.delegate = delegate
+        demod1.process(samples: chirpSamples1)
+        let cer1 = characterErrorRate(expected: text, actual: delegate.decodedText)
+        let r1 = TestResult(category: "chirp", name: "mild_15Hz_5ms",
+                             expected: text, decoded: delegate.decodedText, cer: cer1, score: cerToScore(cer1))
+        results.append(r1); printResult(r1)
+
+        // Moderate chirp: 30 Hz shift, 8 ms decay (older rig)
+        let chirpSamples2 = generateChirpyCW(text: text, config: .standard,
+                                              chirpHz: 30, chirpDecayMs: 8)
+        let demod2 = CWDemodulator(configuration: .standard)
+        delegate.reset()
+        demod2.delegate = delegate
+        demod2.process(samples: chirpSamples2)
+        let cer2 = characterErrorRate(expected: text, actual: delegate.decodedText)
+        let r2 = TestResult(category: "chirp", name: "moderate_30Hz_8ms",
+                             expected: text, decoded: delegate.decodedText, cer: cer2, score: cerToScore(cer2))
+        results.append(r2); printResult(r2)
+
+        // Severe chirp: 50 Hz shift, 10 ms decay (very old rig or homebrew)
+        let chirpSamples3 = generateChirpyCW(text: text, config: .standard,
+                                              chirpHz: 50, chirpDecayMs: 10)
+        let demod3 = CWDemodulator(configuration: .standard)
+        delegate.reset()
+        demod3.delegate = delegate
+        demod3.process(samples: chirpSamples3)
+        let cer3 = characterErrorRate(expected: text, actual: delegate.decodedText)
+        let r3 = TestResult(category: "chirp", name: "severe_50Hz_10ms",
+                             expected: text, decoded: delegate.decodedText, cer: cer3, score: cerToScore(cer3))
+        results.append(r3); printResult(r3)
+
+        print()
+    }
+
     // MARK: - False Positive Test
 
     mutating func runFalsePositiveTest() {
@@ -850,6 +943,7 @@ struct BenchmarkSuite {
             "combined": 2.5,        // Combined impairments = real world
             "long_message": 2.0,    // Realistic QSO-length messages
             "qrm": 2.0,            // Nearby CW stations (contest/pileup)
+            "chirp": 1.5,          // Transmitter frequency shift on key-down
             "false_positive": 2.0,  // Must not decode noise
         ]
 

@@ -153,6 +153,20 @@ func resample(signal: [Float], fromRate: Double, toRate: Double) -> [Float] {
     return result
 }
 
+/// Add a continuous narrowband carrier at a specific frequency within the passband.
+func addNarrowbandCarrier(to signal: [Float], frequencyHz: Double, levelDB: Float, sampleRate: Double = 48000) -> [Float] {
+    let signalRMS = sqrt(signal.map { $0 * $0 }.reduce(0, +) / max(1, Float(signal.count)))
+    let carrierAmplitude = signalRMS * pow(10.0, levelDB / 20.0)
+    let phaseInc = 2.0 * .pi * frequencyHz / sampleRate
+    var phase = 0.0
+    return signal.map { sample in
+        let carrier = carrierAmplitude * Float(sin(phase))
+        phase += phaseInc
+        if phase >= 2.0 * .pi { phase -= 2.0 * .pi }
+        return sample + carrier
+    }
+}
+
 func addWhiteNoise(to signal: [Float], snrDB: Float, rng: inout SeededRandom) -> [Float] {
     let signalPower = signal.map { $0 * $0 }.reduce(0, +) / max(1, Float(signal.count))
     let signalRMS = sqrt(signalPower)
@@ -387,6 +401,9 @@ struct TestResult {
 }
 
 struct BenchmarkSuite {
+    /// Optional parameter overrides for automated optimization
+    var optimParams: OptimizationParams?
+
     let hamTexts: [(name: String, text: String)] = [
         ("cq_call",     "CQ CQ CQ DE W1AW K"),
         ("qso_exchange","UR RST 599 NAME BOB QTH BOSTON"),
@@ -425,6 +442,8 @@ struct BenchmarkSuite {
         runLongMessageTests()
         runImpulseNoiseTests()
         runEquipmentImpairmentTests()
+        runNarrowbandInterferenceTests()
+        runWrongSidebandTest()
         runFalsePositiveTests()
 
         printSummary()
@@ -1021,6 +1040,98 @@ struct BenchmarkSuite {
         print()
     }
 
+    // MARK: - Narrowband Interference Tests
+
+    mutating func runNarrowbandInterferenceTests() {
+        print("--- Narrowband Interference (carrier within passband) ---")
+        let text = "CQ CQ CQ DE W1AW K"
+
+        // Carrier at midpoint (2040 Hz) — right between mark (2125) and space (1955).
+        // This directly affects the spectral SNR measurement which uses the midpoint Goertzel.
+        let r1 = runTest(
+            category: "narrowband_qrm", name: "midpoint_0dB",
+            config: .standard, text: text,
+            impairment: { samples in
+                addNarrowbandCarrier(to: samples, frequencyHz: 2040, levelDB: 0)
+            }
+        )
+        results.append(r1); printResult(r1)
+
+        // Carrier at midpoint, 10 dB stronger
+        let r2 = runTest(
+            category: "narrowband_qrm", name: "midpoint_+10dB",
+            config: .standard, text: text,
+            impairment: { samples in
+                addNarrowbandCarrier(to: samples, frequencyHz: 2040, levelDB: 10)
+            }
+        )
+        results.append(r2); printResult(r2)
+
+        // Carrier near mark tone (2100 Hz, 25 Hz away) — directly in Goertzel mainlobe
+        let r3 = runTest(
+            category: "narrowband_qrm", name: "near_mark_25Hz_0dB",
+            config: .standard, text: text,
+            impairment: { samples in
+                addNarrowbandCarrier(to: samples, frequencyHz: 2100, levelDB: 0)
+            }
+        )
+        results.append(r3); printResult(r3)
+
+        // Carrier near space tone (1980 Hz, 25 Hz away)
+        let r4 = runTest(
+            category: "narrowband_qrm", name: "near_space_25Hz_0dB",
+            config: .standard, text: text,
+            impairment: { samples in
+                addNarrowbandCarrier(to: samples, frequencyHz: 1980, levelDB: 0)
+            }
+        )
+        results.append(r4); printResult(r4)
+
+        print()
+    }
+
+    // MARK: - Wrong Sideband Test
+
+    mutating func runWrongSidebandTest() {
+        print("--- Wrong Sideband Test (operator error) ---")
+        let text = "CQ CQ CQ DE W1AW K"
+
+        // Simulate wrong sideband: generate normal RTTY, then decode with
+        // polarityInverted=true (interprets mark as space and vice versa).
+        // This is equivalent to the operator using LSB instead of USB.
+        let modem = RTTYModem(configuration: .standard)
+        let samples = modem.encodeWithIdle(text: text, preambleMs: 200, postambleMs: 200)
+
+        // Test 1: Normal signal decoded with inverted polarity (simulates wrong sideband)
+        let demod1 = FSKDemodulator(configuration: .standard)
+        delegate.reset()
+        demod1.delegate = delegate
+        demod1.polarityInverted = true  // Wrong sideband
+        demod1.process(samples: samples)
+
+        let decoded1 = delegate.decodedText
+        let cer1 = characterErrorRate(expected: text, actual: decoded1)
+        let r1 = TestResult(category: "wrong_sideband", name: "inverted_decode",
+                             expected: text, decoded: decoded1, cer: cer1, score: cerToScore(cer1))
+        results.append(r1); printResult(r1)
+
+        // Test 2: Inverted signal decoded with inverted polarity (should recover)
+        // Generate inverted signal by setting polarityInverted on the demodulator
+        // that matches the inverted transmission
+        let demod2 = FSKDemodulator(configuration: .standard)
+        delegate.reset()
+        demod2.delegate = delegate
+        // Normal polarity decoding normal signal — baseline confirmation
+        demod2.process(samples: samples)
+        let decoded2 = delegate.decodedText
+        let cer2 = characterErrorRate(expected: text, actual: decoded2)
+        let r2 = TestResult(category: "wrong_sideband", name: "normal_baseline",
+                             expected: text, decoded: decoded2, cer: cer2, score: cerToScore(cer2))
+        results.append(r2); printResult(r2)
+
+        print()
+    }
+
     // MARK: - False Positive
 
     mutating func runFalsePositiveTests() {
@@ -1077,6 +1188,11 @@ struct BenchmarkSuite {
     ) -> TestResult {
         let modem = RTTYModem(configuration: config)
         let demod = FSKDemodulator(configuration: config)
+        // Apply optimization parameter overrides if present
+        if let p = optimParams {
+            if let v = p.correlationThreshold { demod.correlationThreshold = v }
+            if let v = p.stopBitThreshold { demod.stopBitThreshold = v }
+        }
         delegate.reset()
         demod.delegate = delegate
 
@@ -1131,6 +1247,8 @@ struct BenchmarkSuite {
             "long_message":     2.0,   // Realistic QSO-length messages
             "auroral_flutter":  2.0,   // Trans-polar path degradation
             "impulse_noise":    2.5,   // Real-world HF below 14 MHz (non-Gaussian)
+            "narrowband_qrm":   2.0,   // Carrier within RTTY passband
+            "wrong_sideband":   1.0,   // Operator LSB/USB error
             "equipment":        1.5,   // Sound card issues, ground loops
             "false_positive":   1.5,
         ]
@@ -1204,8 +1322,36 @@ struct BenchmarkSuite {
     }
 }
 
+// MARK: - Parameter Override (for automated optimization)
+
+/// Parameters that can be overridden via --params /path/to/params.json.
+/// Used by Optuna/CMA-ES to explore the parameter space automatically.
+struct OptimizationParams: Codable {
+    var correlationThreshold: Float?
+    var stopBitThreshold: Float?
+    var agcDecay: Float?
+    var squelchMultiplier: Float?
+    var afcAlpha: Float?
+    var snrConfidenceLow: Float?    // lower bound of SNR confidence ramp
+    var snrConfidenceRange: Float?  // width of SNR confidence ramp
+}
+
+var optimParams: OptimizationParams?
+if let idx = CommandLine.arguments.firstIndex(of: "--params"),
+   idx + 1 < CommandLine.arguments.count {
+    let path = CommandLine.arguments[idx + 1]
+    if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+       let params = try? JSONDecoder().decode(OptimizationParams.self, from: data) {
+        optimParams = params
+        print("Loaded optimization params from \(path)")
+    } else {
+        print("Warning: could not load params from \(path)")
+    }
+}
+
 // MARK: - Main
 
 print("Starting RTTY benchmark...")
 var suite = BenchmarkSuite()
+suite.optimParams = optimParams
 suite.runAll()

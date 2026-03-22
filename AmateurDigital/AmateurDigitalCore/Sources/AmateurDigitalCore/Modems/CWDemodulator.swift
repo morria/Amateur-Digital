@@ -239,10 +239,10 @@ public final class CWDemodulator {
     private func processBlock(_ block: [Float], rawBlock: [Float]) {
         // Main Goertzel uses bandpass-filtered signal for better SNR
         var filter = toneFilter
-        var rawPower = Double(filter.processBlock(block))
+        let goertzelPower = Double(filter.processBlock(block))
         toneFilter = filter
 
-        // (Interference cancellation removed — AFC can't distinguish our signal from interferer)
+        var rawPower = goertzelPower
 
         // AFC uses unfiltered signal to detect off-frequency signals
         for i in 0..<afcFilters.count {
