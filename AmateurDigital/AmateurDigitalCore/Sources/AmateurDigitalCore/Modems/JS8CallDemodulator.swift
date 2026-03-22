@@ -4,6 +4,8 @@
 //
 //  JS8Call decoder: audio -> spectrogram -> Costas sync -> LDPC decode -> text.
 //  Handles noise, fading, frequency drift, clock offset, and multi-signal.
+//  Delegates the shared 8-GFSK physical layer to GFSKSyncSearch, GFSKSymbolExtractor,
+//  and GFSKDecoder. Applies JS8Call-specific CRC and message unpacking on top.
 //
 
 import Foundation
@@ -29,13 +31,6 @@ public protocol JS8CallDemodulatorDelegate: AnyObject {
 }
 
 // MARK: - Demodulator
-
-/// Internal candidate signal detected during sync search.
-private struct JS8SyncCandidate {
-    var freq: Double
-    var timeOffset: Double
-    var sync: Double
-}
 
 public final class JS8CallDemodulator {
 
@@ -210,142 +205,57 @@ public final class JS8CallDemodulator {
         return out
     }
 
-    /// Main decoder: multi-pass Costas sync + LDPC decode.
-    /// Uses Goertzel filters at exact tone frequencies to avoid FFT bin alignment issues.
-    private func runDecoder(dd: [Double]) -> [JS8CallFrame] {
+    /// Build the shared GFSK components configured for the current JS8Call submode.
+    private func makeGFSKComponents() -> (syncSearch: GFSKSyncSearch, symbolExtractor: GFSKSymbolExtractor) {
         let sub = currentConfiguration.submode
-        let nsps = sub.nsps
+        let gfskConfig = currentConfiguration.gfskConfig
+
         let nstep = sub.nstep
-        let nmax = dd.count
-        let costas = sub.costas
-        let nssy = nsps / nstep
-        let toneSpacing = sub.toneSpacing
-        let twopi = 2.0 * Double.pi
-
-        guard nmax > nsps * JS8CallConstants.NN else { return [] }
-
-        let nhsym = nmax / nstep - 3
-        guard nhsym > 0 else { return [] }
-
         let tstep = Double(nstep) / internalRate
         let jstrt = Int((sub.startDelay / tstep) + 0.5)
 
-        // Goertzel-based sync: compute power at 8 tones for each carrier frequency.
-        // Search carriers in toneSpacing steps across the passband.
-        let freqStep = toneSpacing / 2.0  // Half-tone steps for better frequency resolution
-        let minFreq = max(frequencyRange.low, 100.0)
-        let maxFreq = min(frequencyRange.high, internalRate / 2.0 - 8.0 * toneSpacing)
+        let syncSearch = GFSKSyncSearch(
+            config: gfskConfig,
+            frequencyRange: frequencyRange,
+            frequencyStep: sub.toneSpacing / 2.0,
+            timeSearchRange: sub.jz,
+            timeStartOffset: jstrt,
+            minSyncMetric: JS8CallConstants.asyncMin,
+            maxCandidates: JS8CallConstants.maxCandidates,
+            dedupeHz: sub.dedupeHz
+        )
 
-        // Pre-convert dd to Float for Goertzel (it expects [Float])
-        let ddFloat = dd.map { Float($0) }
+        let symbolExtractor = GFSKSymbolExtractor(config: gfskConfig, minSyncTones: 7)
 
-        var candidates: [JS8SyncCandidate] = []
+        return (syncSearch, symbolExtractor)
+    }
 
-        var carrierFreq = minFreq
-        while carrierFreq <= maxFreq {
-            // Compute Goertzel power at 8 tones for each time step.
-            // Use nstep (quarter-symbol) block for coarse sync search (4x faster than nsps).
-            // The reduced frequency selectivity (25 Hz vs 6.25 Hz) is adequate for
-            // finding candidates; fine resolution is applied in symbol extraction.
-            var tonePower = [[Double]](repeating: [Double](repeating: 0, count: 8), count: nhsym)
+    /// Main decoder: uses shared GFSK sync search + symbol extraction + LDPC decode,
+    /// then applies JS8Call-specific CRC verification and message unpacking.
+    private func runDecoder(dd: [Double]) -> [JS8CallFrame] {
+        let sub = currentConfiguration.submode
+        let ndepth = currentConfiguration.decodeDepth
 
-            let goertzelLen = nsps  // Full symbol period for reliable sync
-            for tone in 0..<8 {
-                let freq = carrierFreq + Double(tone) * toneSpacing
-                let k = freq * Double(goertzelLen) / internalRate
-                let coeff = Float(2.0 * cos(twopi * k / Double(goertzelLen)))
-                for j in 0..<nhsym {
-                    let start = j * nstep
-                    guard start + goertzelLen <= nmax else { break }
-                    var s0: Float = 0, s1: Float = 0, s2g: Float = 0
-                    for i in 0..<goertzelLen {
-                        s0 = ddFloat[start + i] + coeff * s1 - s2g
-                        s2g = s1; s1 = s0
-                    }
-                    tonePower[j][tone] = Double(s1 * s1 + s2g * s2g - coeff * s1 * s2g)
-                }
-            }
+        let (syncSearch, symbolExtractor) = makeGFSKComponents()
 
-            // Search time offsets for Costas sync
-            var bestSync = 0.0
-            var bestJOff = 0
+        // Step 1: Find sync candidates using the shared GFSK sync search
+        let candidates = syncSearch.findCandidates(dd: dd)
+        guard !candidates.isEmpty else { return [] }
 
-            for jOff in -sub.jz...sub.jz {
-                var ta = 0.0, tb = 0.0, tc = 0.0
-                var t0a = 0.0, t0b = 0.0, t0c = 0.0
-
-                for n in 0..<7 {
-                    let ka = jOff + jstrt + nssy * n
-                    if ka >= 0 && ka < nhsym {
-                        ta += tonePower[ka][costas.a[n]]
-                        for t in 0..<7 { t0a += tonePower[ka][t] }
-                    }
-                    let kb = jOff + jstrt + nssy * (n + 36)
-                    if kb >= 0 && kb < nhsym {
-                        tb += tonePower[kb][costas.b[n]]
-                        for t in 0..<7 { t0b += tonePower[kb][t] }
-                    }
-                    let kc = jOff + jstrt + nssy * (n + 72)
-                    if kc >= 0 && kc < nhsym {
-                        tc += tonePower[kc][costas.c[n]]
-                        for t in 0..<7 { t0c += tonePower[kc][t] }
-                    }
-                }
-
-                let bg_abc = (t0a + t0b + t0c - ta - tb - tc) / 6.0
-                let sync_abc = bg_abc > 0 ? (ta + tb + tc) / bg_abc : 0
-                let bg_ab = (t0a + t0b - ta - tb) / 6.0
-                let sync_ab = bg_ab > 0 ? (ta + tb) / bg_ab : 0
-                let bg_bc = (t0b + t0c - tb - tc) / 6.0
-                let sync_bc = bg_bc > 0 ? (tb + tc) / bg_bc : 0
-
-                let sync = max(sync_abc, sync_ab, sync_bc)
-                if sync > bestSync { bestSync = sync; bestJOff = jOff }
-            }
-
-            if bestSync >= JS8CallConstants.asyncMin {
-                candidates.append(JS8SyncCandidate(
-                    freq: carrierFreq,
-                    timeOffset: Double(bestJOff + jstrt) * tstep,
-                    sync: bestSync
-                ))
-            }
-
-            carrierFreq += freqStep
-        }
-
-        // Sort by sync strength (descending)
-        candidates.sort { $0.sync > $1.sync }
-
-        // Deduplicate (keep stronger within dedupeHz)
-        let dedupeHz = sub.dedupeHz
-        var filtered: [JS8SyncCandidate] = []
-        for c in candidates {
-            if !filtered.contains(where: { abs($0.freq - c.freq) < dedupeHz }) {
-                filtered.append(c)
-            }
-        }
-        candidates = Array(filtered.prefix(JS8CallConstants.maxCandidates))
-
-        // Decode each candidate
+        // Step 2: Decode each candidate with JS8Call-specific CRC and unpacking
         var decoded: [JS8CallFrame] = []
         var ddMutable = dd  // For signal subtraction
 
-        let ndepth = currentConfiguration.decodeDepth
         let npass = ndepth >= 3 ? 4 : (ndepth >= 2 ? 3 : 1)
 
         for ipass in 0..<npass {
             // Re-sync on passes 2+ if we had decodes
             if ipass > 0 && decoded.isEmpty { break }
 
-            // For multi-pass, re-use the initial candidates (signal subtraction
-            // modifies ddMutable but we decode at the same frequencies).
-            let candidateList = candidates
-
-            for cand in candidateList {
-                if let frame = decodeSingleJS8SyncCandidate(
-                    dd: &ddMutable, candidate: cand, sub: sub,
-                    ipass: ipass, ndepth: ndepth, subtract: ipass < npass - 1
+            for candidate in candidates {
+                if let frame = decodeSingleCandidate(
+                    dd: &ddMutable, candidate: candidate, symbolExtractor: symbolExtractor,
+                    sub: sub, ipass: ipass, ndepth: ndepth, subtract: ipass < npass - 1
                 ) {
                     // Dedupe across passes
                     if !decoded.contains(where: { $0.message == frame.message }) {
@@ -360,123 +270,42 @@ public final class JS8CallDemodulator {
 
     // MARK: - Single Candidate Decode
 
-    private func decodeSingleJS8SyncCandidate(
-        dd: inout [Double], candidate: JS8SyncCandidate,
+    /// Decode a single candidate: extract LLRs via the shared symbol extractor,
+    /// run LDPC decode, then apply JS8Call CRC and message unpacking.
+    private func decodeSingleCandidate(
+        dd: inout [Double], candidate: GFSKSyncCandidate,
+        symbolExtractor: GFSKSymbolExtractor,
         sub: JS8CallSubmode, ipass: Int, ndepth: Int, subtract: Bool
     ) -> JS8CallFrame? {
-        let nsps = sub.nsps
-        let costas = sub.costas
-        let twopi = 2.0 * Double.pi
-        let twopiOverSR = twopi / internalRate
-
-        let f1 = candidate.freq
-        let t0 = candidate.timeOffset
-        let symStartBase = Int(t0 * internalRate)
-
-        // Extract 79 symbol spectra using DFT at 8 tone frequencies
-        var s2 = [[Double]](repeating: [Double](repeating: 0, count: 8), count: JS8CallConstants.NN)
-
-        for k in 0..<JS8CallConstants.NN {
-            let symStart = symStartBase + k * nsps
-            guard symStart >= 0 && symStart + nsps <= dd.count else { continue }
-
-            // Goertzel at each of the 8 tone frequencies (exact, no bin mapping)
-            for tone in 0..<8 {
-                let freq = f1 + Double(tone) * sub.toneSpacing
-                let gk = freq * Double(nsps) / internalRate
-                let coeff = Float(2.0 * cos(twopi * gk / Double(nsps)))
-                var s0: Float = 0, s1: Float = 0, s2v: Float = 0
-                for i in 0..<nsps {
-                    s0 = Float(dd[symStart + i]) + coeff * s1 - s2v
-                    s2v = s1; s1 = s0
-                }
-                s2[k][tone] = Double(s1 * s1 + s2v * s2v - coeff * s1 * s2v)
-            }
+        // Use shared symbol extractor to get LLRs and data spectra
+        guard let extraction = symbolExtractor.extract(dd: dd, candidate: candidate) else {
+            return nil
         }
 
-        // Hard sync quality check: count matching Costas tones
-        var nsync = 0
-        for k in 0..<7 {
-            if k < s2.count {
-                let peak0 = s2[k].enumerated().max(by: { $0.element < $1.element })?.offset ?? -1
-                if peak0 == costas.a[k] { nsync += 1 }
-            }
-            if k + 36 < s2.count {
-                let peak36 = s2[k + 36].enumerated().max(by: { $0.element < $1.element })?.offset ?? -1
-                if peak36 == costas.b[k] { nsync += 1 }
-            }
-            if k + 72 < s2.count {
-                let peak72 = s2[k + 72].enumerated().max(by: { $0.element < $1.element })?.offset ?? -1
-                if peak72 == costas.c[k] { nsync += 1 }
-            }
-        }
-        guard nsync > 6 else { return nil }  // Need at least 7 of 21
-
-        // Extract 58 data symbols (skip Costas)
-        var s1 = [[Double]](repeating: [Double](repeating: 0, count: 8), count: JS8CallConstants.ND)
-        var j = 0
-        for k in 0..<JS8CallConstants.NN {
-            if k < 7 { continue }
-            if k >= 36 && k <= 42 { continue }
-            if k >= 72 { continue }  // Costas C starts at symbol 72
-            if j < JS8CallConstants.ND {
-                s1[j] = s2[k]
-                j += 1
-            }
-        }
-
-        // Compute soft bit metrics (LLRs)
-        var llr = [Double](repeating: 0, count: JS8CallConstants.N)
-        for j in 0..<JS8CallConstants.ND {
-            let ps = s1[j]
-            let r4 = max(ps[4], ps[5], ps[6], ps[7]) - max(ps[0], ps[1], ps[2], ps[3])
-            let r2 = max(ps[2], ps[3], ps[6], ps[7]) - max(ps[0], ps[1], ps[4], ps[5])
-            let r1 = max(ps[1], ps[3], ps[5], ps[7]) - max(ps[0], ps[2], ps[4], ps[6])
-            llr[3 * j]     = r4
-            llr[3 * j + 1] = r2
-            llr[3 * j + 2] = r1
-        }
-
-        // Normalize: zero mean, unit variance, scale by 2.83
-        let avg = llr.reduce(0, +) / Double(JS8CallConstants.N)
-        let variance = llr.map { ($0 - avg) * ($0 - avg) }.reduce(0, +) / Double(JS8CallConstants.N)
-        let sigma = sqrt(max(variance, 1e-10))
-        let scalefac = 2.83
-        for i in 0..<JS8CallConstants.N {
-            llr[i] = scalefac * (llr[i] - avg) / sigma
-        }
+        let osdDepth = ndepth >= 3 ? 3 : 0
 
         // Multi-pass decoding (try different LLR versions)
         for decodePass in 0..<4 {
-            var passLLR = llr
+            var passLLR: [Double]
             switch decodePass {
+            case 0:
+                passLLR = extraction.llr
             case 1:
-                // Log-metric version
-                for j in 0..<JS8CallConstants.ND {
-                    let ps = s1[j].map { log(max($0, 1e-32)) }
-                    let r4 = max(ps[4], ps[5], ps[6], ps[7]) - max(ps[0], ps[1], ps[2], ps[3])
-                    let r2 = max(ps[2], ps[3], ps[6], ps[7]) - max(ps[0], ps[1], ps[4], ps[5])
-                    let r1 = max(ps[1], ps[3], ps[5], ps[7]) - max(ps[0], ps[2], ps[4], ps[6])
-                    passLLR[3 * j]     = r4
-                    passLLR[3 * j + 1] = r2
-                    passLLR[3 * j + 2] = r1
-                }
-                let a2 = passLLR.reduce(0, +) / Double(JS8CallConstants.N)
-                let v2 = passLLR.map { ($0 - a2) * ($0 - a2) }.reduce(0, +) / Double(JS8CallConstants.N)
-                let s2n = sqrt(max(v2, 1e-10))
-                for i in 0..<JS8CallConstants.N { passLLR[i] = scalefac * (passLLR[i] - a2) / s2n }
+                // Log-metric version via the shared extractor
+                passLLR = symbolExtractor.computeLogLLRs(dataSpectra: extraction.dataSpectra)
             case 2:
                 // Erase first 24 bits
+                passLLR = extraction.llr
                 for i in 0..<24 { passLLR[i] = 0 }
             case 3:
                 // Erase first 48 bits
+                passLLR = extraction.llr
                 for i in 0..<48 { passLLR[i] = 0 }
             default:
-                break
+                passLLR = extraction.llr
             }
 
             // LDPC decode
-            let osdDepth = ndepth >= 3 ? 3 : 0
             guard let result = LDPC174_87.decode(
                 llr: passLLR, maxBPIterations: 30, osdDepth: osdDepth
             ) else { continue }
@@ -484,31 +313,31 @@ public final class JS8CallDemodulator {
             // Quality gates
             let hd = Double(result.nharderrors) + result.dmin
             if hd >= 60.0 { continue }
-            if candidate.sync < 2.0 && result.nharderrors > 35 { continue }
+            if candidate.syncStrength < 2.0 && result.nharderrors > 35 { continue }
             if ipass > 1 && result.nharderrors > 39 { continue }
             if decodePass == 3 && result.nharderrors > 30 { continue }
 
-            // Verify CRC
+            // JS8Call-specific: Verify CRC-12 XOR 42
             guard JS8CallCodec.verifyCRC(result.bits) else { continue }
 
-            // Unpack message
+            // JS8Call-specific: Unpack message
             guard let unpacked = JS8CallCodec.unpack(result.bits) else { continue }
 
             // SNR estimate
-            let snr = 10.0 * log10(max(candidate.sync - 1.0, 0.001)) - 27.0
+            let snr = 10.0 * log10(max(candidate.syncStrength - 1.0, 0.001)) - 27.0
             let quality = 1.0 - hd / 60.0
 
             // Signal subtraction (remove decoded signal from audio for next pass)
             if subtract {
                 subtractSignal(dd: &dd, message: unpacked.message, frameType: unpacked.frameType,
-                               sub: sub, freq: f1, timeOffset: t0)
+                               sub: sub, freq: candidate.frequency, timeOffset: candidate.timeOffset)
             }
 
             return JS8CallFrame(
                 message: unpacked.message,
                 frameType: unpacked.frameType,
-                frequency: f1,
-                timeOffset: t0,
+                frequency: candidate.frequency,
+                timeOffset: candidate.timeOffset,
                 snr: max(snr, -28),
                 quality: max(0, min(1, quality)),
                 submodeName: sub.name
@@ -525,7 +354,7 @@ public final class JS8CallDemodulator {
         dd: inout [Double], message: String, frameType: Int,
         sub: JS8CallSubmode, freq: Double, timeOffset: Double
     ) {
-        var mod = JS8CallModulator(configuration: currentConfiguration.withSubmode(sub).withCarrierFrequency(freq))
+        let mod = JS8CallModulator(configuration: currentConfiguration.withSubmode(sub).withCarrierFrequency(freq))
         let tones = mod.encodeTones(message: message, frameType: frameType)
 
         let nsps = sub.nsps
@@ -534,7 +363,6 @@ public final class JS8CallDemodulator {
         let symStartBase = Int(timeOffset * internalRate)
 
         // For each symbol, estimate amplitude and subtract
-        var phi = 0.0
         for k in 0..<JS8CallConstants.NN {
             let symStart = symStartBase + k * nsps
             guard symStart >= 0 && symStart + nsps <= dd.count else { continue }

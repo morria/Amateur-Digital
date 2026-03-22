@@ -612,9 +612,59 @@ func generateTrainingSet(rng: inout SeededRandom) -> [(mode: String, condition: 
         set.append((mode, "real-\(basename)", wavSamples))
     }
 
-    // Note: JS8Call test WAVs in research/js8call/media/tests/ are at 12 kHz
-    // internal sample rate. Resampling to 48 kHz creates artifacts that make them
-    // unreliable as ground truth. Skipping until 48 kHz JS8Call recordings available.
+    // --- SDR corpus samples (real 48 kHz recordings from WebSDR) ---
+    // Auto-discover all WAV files and map mode from filename pattern.
+    // Note: labels indicate what frequency band was tuned, not verified content.
+    // CW and JS8Call labels are often wrong (no signal present). Accept PSK-family
+    // alternates since PSK31/BPSK63 are spectrally identical in real conditions.
+    let corpusDir = "/Users/asm/d/sdr-sampler/corpus/raw"
+    if let corpusFiles = try? FileManager.default.contentsOfDirectory(atPath: corpusDir) {
+        let modeMap: [String: String] = [
+            "cw": "CW", "rtty": "RTTY", "psk31": "PSK31", "js8call": "JS8Call",
+            "ft8": "JS8Call", // FT8 uses same 8-GFSK as JS8Call — accept either
+            "noise": "noise",
+        ]
+
+        for file in corpusFiles.sorted() where file.hasSuffix(".wav") {
+            let basename = file.replacingOccurrences(of: "session_", with: "")
+            // Extract mode from filename: session_<mode>_<band>_...
+            let parts = basename.components(separatedBy: "_")
+            guard parts.count >= 2 else { continue }
+            let modeKey = parts[0]
+            guard let expectedMode = modeMap[modeKey] else { continue }
+
+            let path = "\(corpusDir)/\(file)"
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                  data.count > 44 else { continue }
+
+            let bitsPerSample = Int(data[34..<36].withUnsafeBytes { $0.loadUnaligned(as: UInt16.self) })
+            guard bitsPerSample == 16 else { continue }
+
+            var dataOffset = 12
+            while dataOffset + 8 < data.count {
+                let chunkID = String(data: data[dataOffset..<dataOffset+4], encoding: .ascii) ?? ""
+                let chunkSize = Int(data[dataOffset+4..<dataOffset+8].withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) })
+                if chunkID == "data" { dataOffset += 8; break }
+                dataOffset += 8 + chunkSize
+            }
+
+            let totalSamples = (data.count - dataOffset) / 2
+            guard totalSamples > minSamples else { continue }
+
+            let startSample = min(totalSamples / 2 - minSamples / 2, totalSamples - minSamples)
+            var wavSamples = [Float](repeating: 0, count: minSamples)
+            for i in 0..<minSamples {
+                let offset = dataOffset + (startSample + i) * 2
+                guard offset + 1 < data.count else { break }
+                let v = data[offset..<offset+2].withUnsafeBytes { $0.loadUnaligned(as: Int16.self) }
+                wavSamples[i] = Float(v) / 32768.0
+            }
+
+            let band = parts.count >= 2 ? parts[1] : ""
+            let label = "sdr-\(modeKey)_\(band)"
+            set.append((expectedMode, label, wavSamples))
+        }
+    }
 
     return set
 }

@@ -189,6 +189,11 @@ class SettingsManager: NSObject, ObservableObject, @unchecked Sendable {
         didSet { save(cwSquelch, forKey: "cwSquelch") }
     }
 
+    /// CW decoder type: "classic" (Goertzel + state machine) or "bayesian" (probabilistic)
+    @Published var cwDecoderType: String {
+        didSet { save(cwDecoderType, forKey: "cwDecoderType") }
+    }
+
     // RTTY Global Settings (per-channel defaults)
     @Published var rttyPolarityInverted: Bool {
         didSet { save(rttyPolarityInverted, forKey: "rttyPolarityInverted") }
@@ -260,6 +265,7 @@ class SettingsManager: NSObject, ObservableObject, @unchecked Sendable {
         self.cwWPM = Self.initialLoadDouble(forKey: "cwWPM", default: 20.0)
         self.cwToneFrequency = Self.initialLoadDouble(forKey: "cwToneFrequency", default: 700.0)
         self.cwSquelch = Self.initialLoadDouble(forKey: "cwSquelch", default: 0.0)
+        self.cwDecoderType = Self.initialLoadString(forKey: "cwDecoderType", default: "classic")
 
         self.rttyPolarityInverted = Self.initialLoadBool(forKey: "rttyPolarityInverted", default: false)
         self.rttyFrequencyOffset = Self.initialLoadInt(forKey: "rttyFrequencyOffset", default: 0)
@@ -349,6 +355,7 @@ class SettingsManager: NSObject, ObservableObject, @unchecked Sendable {
             self.cwWPM = loadDouble(forKey: "cwWPM", default: 20.0)
             self.cwToneFrequency = loadDouble(forKey: "cwToneFrequency", default: 700.0)
             self.cwSquelch = loadDouble(forKey: "cwSquelch", default: 0.0)
+            self.cwDecoderType = loadString(forKey: "cwDecoderType", default: "classic")
             self.rttyPolarityInverted = loadBool(forKey: "rttyPolarityInverted", default: false)
             self.rttyFrequencyOffset = loadInt(forKey: "rttyFrequencyOffset", default: 0)
             self.noiseFloorThreshold = loadDouble(forKey: "noiseFloorThreshold", default: -60.0)

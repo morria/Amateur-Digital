@@ -59,6 +59,11 @@ public struct JS8CallCostasArrays: Sendable, Equatable {
         case .modified: return .modified
         }
     }
+
+    /// Convert to the shared GFSKCostasArrays type.
+    public var gfskCostasArrays: GFSKCostasArrays {
+        GFSKCostasArrays(a: a, b: b, c: c)
+    }
 }
 
 // MARK: - Submode
@@ -120,6 +125,22 @@ public struct JS8CallConfiguration: Equatable, Sendable {
 
     public var internalSampleRate: Double { JS8CallConstants.internalSampleRate }
     public var decimationFactor: Int { JS8CallConstants.decimationFactor }
+
+    /// Convert to a GFSKConfig for use with the shared physical layer.
+    public var gfskConfig: GFSKConfig {
+        GFSKConfig(
+            sampleRate: sampleRate,
+            internalRate: JS8CallConstants.internalSampleRate,
+            toneSpacing: submode.toneSpacing,
+            samplesPerSymbol: submode.nsps,
+            costasArrays: submode.costas.gfskCostasArrays,
+            symbolCount: JS8CallConstants.NN,
+            dataSymbolCount: JS8CallConstants.ND,
+            syncSymbolCount: JS8CallConstants.NS,
+            codewordLength: JS8CallConstants.N,
+            carrierFrequency: carrierFrequency
+        )
+    }
 
     public init(
         submode: JS8CallSubmode = .normal,

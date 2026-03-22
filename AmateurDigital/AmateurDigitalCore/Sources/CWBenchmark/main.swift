@@ -260,6 +260,62 @@ struct TestResult {
     let score: Double
 }
 
+// MARK: - Decoder Abstraction
+
+/// Wraps either a classic CWDemodulator or BayesianCWDecoder so tests can use either.
+protocol CWDecoderWrapper {
+    func process(samples: [Float])
+    var decodedText: String { get }
+    func reset()
+}
+
+class ClassicDecoderWrapper: CWDecoderWrapper {
+    let demodulator: CWDemodulator
+    let delegate: BenchmarkDelegate
+
+    init(configuration: CWConfiguration) {
+        self.demodulator = CWDemodulator(configuration: configuration)
+        self.delegate = BenchmarkDelegate()
+        self.demodulator.delegate = self.delegate
+    }
+
+    func process(samples: [Float]) {
+        demodulator.process(samples: samples)
+    }
+
+    var decodedText: String { delegate.decodedText }
+
+    func reset() { delegate.reset() }
+}
+
+class BayesianDecoderWrapper: CWDecoderWrapper {
+    let decoder: BayesianCWDecoder
+    private var decodedCharacters: [Character] = []
+
+    init(configuration: CWConfiguration, params: BayesianCWParams?) {
+        self.decoder = BayesianCWDecoder(configuration: configuration)
+        if let p = params {
+            p.apply(to: self.decoder)
+        }
+        self.decoder.onCharacterDecoded = { [weak self] char, _ in
+            self?.decodedCharacters.append(char)
+        }
+    }
+
+    func process(samples: [Float]) {
+        decoder.process(samples: samples)
+    }
+
+    var decodedText: String { String(decodedCharacters) }
+
+    func reset() { decodedCharacters.removeAll() }
+}
+
+enum DecoderMode {
+    case classic
+    case bayesian
+}
+
 struct BenchmarkSuite {
     let hamTexts: [(name: String, text: String)] = [
         ("cq_call", "CQ CQ CQ DE W1AW K"),
@@ -275,11 +331,29 @@ struct BenchmarkSuite {
     ]
 
     var results: [TestResult] = []
-    let delegate = BenchmarkDelegate()
+
+    /// When true, only run the Bayesian decoder (for faster optimization).
+    var bayesianOnly: Bool = false
+
+    /// Optional Bayesian parameter overrides (loaded from --bayesian-params JSON).
+    var bayesianParams: BayesianCWParams?
+
+    /// Which decoder to use for this run.
+    var decoderMode: DecoderMode = .classic
+
+    func makeDecoder(configuration: CWConfiguration) -> CWDecoderWrapper {
+        switch decoderMode {
+        case .classic:
+            return ClassicDecoderWrapper(configuration: configuration)
+        case .bayesian:
+            return BayesianDecoderWrapper(configuration: configuration, params: bayesianParams)
+        }
+    }
 
     mutating func runAll() {
+        let modeLabel = decoderMode == .bayesian ? "BAYESIAN" : "CLASSIC"
         print(String(repeating: "=", count: 70))
-        print("CW (MORSE CODE) DECODING BENCHMARK")
+        print("CW (MORSE CODE) DECODING BENCHMARK [\(modeLabel)]")
         print(String(repeating: "=", count: 70))
         print()
 
@@ -675,37 +749,31 @@ struct BenchmarkSuite {
         // Mild chirp: 15 Hz upward shift, 5 ms decay (modern rig with slight instability)
         let chirpSamples1 = preamble + generateChirpyCW(text: text, config: .standard,
                                               chirpHz: 15, chirpDecayMs: 5) + postamble
-        let demod1 = CWDemodulator(configuration: .standard)
-        delegate.reset()
-        demod1.delegate = delegate
-        demod1.process(samples: chirpSamples1)
-        let cer1 = characterErrorRate(expected: text, actual: delegate.decodedText)
+        let dec1 = makeDecoder(configuration: .standard)
+        dec1.process(samples: chirpSamples1)
+        let cer1 = characterErrorRate(expected: text, actual: dec1.decodedText)
         let r1 = TestResult(category: "chirp", name: "mild_15Hz_5ms",
-                             expected: text, decoded: delegate.decodedText, cer: cer1, score: cerToScore(cer1))
+                             expected: text, decoded: dec1.decodedText, cer: cer1, score: cerToScore(cer1))
         results.append(r1); printResult(r1)
 
         // Moderate chirp: 30 Hz shift, 8 ms decay (older rig)
         let chirpSamples2 = preamble + generateChirpyCW(text: text, config: .standard,
                                               chirpHz: 30, chirpDecayMs: 8) + postamble
-        let demod2 = CWDemodulator(configuration: .standard)
-        delegate.reset()
-        demod2.delegate = delegate
-        demod2.process(samples: chirpSamples2)
-        let cer2 = characterErrorRate(expected: text, actual: delegate.decodedText)
+        let dec2 = makeDecoder(configuration: .standard)
+        dec2.process(samples: chirpSamples2)
+        let cer2 = characterErrorRate(expected: text, actual: dec2.decodedText)
         let r2 = TestResult(category: "chirp", name: "moderate_30Hz_8ms",
-                             expected: text, decoded: delegate.decodedText, cer: cer2, score: cerToScore(cer2))
+                             expected: text, decoded: dec2.decodedText, cer: cer2, score: cerToScore(cer2))
         results.append(r2); printResult(r2)
 
         // Severe chirp: 50 Hz shift, 10 ms decay (very old rig or homebrew)
         let chirpSamples3 = preamble + generateChirpyCW(text: text, config: .standard,
                                               chirpHz: 50, chirpDecayMs: 10) + postamble
-        let demod3 = CWDemodulator(configuration: .standard)
-        delegate.reset()
-        demod3.delegate = delegate
-        demod3.process(samples: chirpSamples3)
-        let cer3 = characterErrorRate(expected: text, actual: delegate.decodedText)
+        let dec3 = makeDecoder(configuration: .standard)
+        dec3.process(samples: chirpSamples3)
+        let cer3 = characterErrorRate(expected: text, actual: dec3.decodedText)
         let r3 = TestResult(category: "chirp", name: "severe_50Hz_10ms",
-                             expected: text, decoded: delegate.decodedText, cer: cer3, score: cerToScore(cer3))
+                             expected: text, decoded: dec3.decodedText, cer: cer3, score: cerToScore(cer3))
         results.append(r3); printResult(r3)
 
         print()
@@ -758,9 +826,7 @@ struct BenchmarkSuite {
     mutating func runFalsePositiveTest() {
         print("--- False Positive Test ---")
 
-        let demodulator = CWDemodulator(configuration: .standard)
-        delegate.reset()
-        demodulator.delegate = delegate
+        let decoder = makeDecoder(configuration: .standard)
 
         // 3 seconds of pure noise
         var rng = SeededRandom(seed: 12345)
@@ -770,9 +836,9 @@ struct BenchmarkSuite {
             noise[i] = Float(rng.nextGaussian()) * 0.1
         }
 
-        demodulator.process(samples: noise)
+        decoder.process(samples: noise)
 
-        let decoded = delegate.decodedText
+        let decoded = decoder.decodedText
         let falsePositiveCount = decoded.count
         let score = falsePositiveCount == 0 ? 100.0 : max(0.0, 100.0 - Double(falsePositiveCount) * 10.0)
         let result = TestResult(
@@ -792,9 +858,7 @@ struct BenchmarkSuite {
         impairment: (([Float]) -> [Float])? = nil
     ) -> TestResult {
         var modulator = CWModulator(configuration: config)
-        let demodulator = CWDemodulator(configuration: config)
-        delegate.reset()
-        demodulator.delegate = delegate
+        let decoder = makeDecoder(configuration: config)
 
         var samples = modulator.modulateTextWithEnvelope(text, preambleMs: 300, postambleMs: 500)
 
@@ -802,9 +866,9 @@ struct BenchmarkSuite {
             samples = impair(samples)
         }
 
-        demodulator.process(samples: samples)
+        decoder.process(samples: samples)
 
-        let decoded = delegate.decodedText
+        let decoded = decoder.decodedText
         let cer = characterErrorRate(expected: text, actual: decoded)
         return TestResult(category: category, name: name, expected: text, decoded: decoded, cer: cer, score: cerToScore(cer))
     }
@@ -818,12 +882,10 @@ struct BenchmarkSuite {
         var modulator = CWModulator(configuration: txConfig)
         let samples = modulator.modulateTextWithEnvelope(text, preambleMs: 300, postambleMs: 500)
 
-        let demodulator = CWDemodulator(configuration: baseConfig)
-        delegate.reset()
-        demodulator.delegate = delegate
-        demodulator.process(samples: samples)
+        let decoder = makeDecoder(configuration: baseConfig)
+        decoder.process(samples: samples)
 
-        let decoded = delegate.decodedText
+        let decoded = decoder.decodedText
         let cer = characterErrorRate(expected: text, actual: decoded)
         return TestResult(category: category, name: name, expected: text, decoded: decoded, cer: cer, score: cerToScore(cer))
     }
@@ -838,12 +900,10 @@ struct BenchmarkSuite {
         var rng = SeededRandom(seed: 555 + UInt64(abs(snrDB) * 10))
         samples = addWhiteNoise(to: samples, snrDB: snrDB, rng: &rng)
 
-        let demodulator = CWDemodulator(configuration: baseConfig)
-        delegate.reset()
-        demodulator.delegate = delegate
-        demodulator.process(samples: samples)
+        let decoder = makeDecoder(configuration: baseConfig)
+        decoder.process(samples: samples)
 
-        let decoded = delegate.decodedText
+        let decoded = decoder.decodedText
         let cer = characterErrorRate(expected: text, actual: decoded)
         return TestResult(category: category, name: name, expected: text, decoded: decoded, cer: cer, score: cerToScore(cer))
     }
@@ -861,12 +921,10 @@ struct BenchmarkSuite {
         samples.append(contentsOf: applyTimingJitter(to: text, config: config, jitterFraction: jitterFraction, rng: &rng))
         samples.append(contentsOf: [Float](repeating: 0, count: postSamples))
 
-        let demodulator = CWDemodulator(configuration: config)
-        delegate.reset()
-        demodulator.delegate = delegate
-        demodulator.process(samples: samples)
+        let decoder = makeDecoder(configuration: config)
+        decoder.process(samples: samples)
 
-        let decoded = delegate.decodedText
+        let decoded = decoder.decodedText
         let cer = characterErrorRate(expected: text, actual: decoded)
         return TestResult(category: category, name: name, expected: text, decoded: decoded, cer: cer, score: cerToScore(cer))
     }
@@ -886,12 +944,10 @@ struct BenchmarkSuite {
         var noiseRng = SeededRandom(seed: 444)
         samples = addWhiteNoise(to: samples, snrDB: snrDB, rng: &noiseRng)
 
-        let demodulator = CWDemodulator(configuration: config)
-        delegate.reset()
-        demodulator.delegate = delegate
-        demodulator.process(samples: samples)
+        let decoder = makeDecoder(configuration: config)
+        decoder.process(samples: samples)
 
-        let decoded = delegate.decodedText
+        let decoded = decoder.decodedText
         let cer = characterErrorRate(expected: text, actual: decoded)
         return TestResult(category: category, name: name, expected: text, decoded: decoded, cer: cer, score: cerToScore(cer))
     }
@@ -909,12 +965,10 @@ struct BenchmarkSuite {
         samples.append(contentsOf: modulator.modulateText(text))
         samples.append(contentsOf: [Float](repeating: 0, count: postSamples))
 
-        let demodulator = CWDemodulator(configuration: config)
-        delegate.reset()
-        demodulator.delegate = delegate
-        demodulator.process(samples: samples)
+        let decoder = makeDecoder(configuration: config)
+        decoder.process(samples: samples)
 
-        let decoded = delegate.decodedText
+        let decoded = decoder.decodedText
         let cer = characterErrorRate(expected: text, actual: decoded)
         return TestResult(category: category, name: name, expected: text, decoded: decoded, cer: cer, score: cerToScore(cer))
     }
@@ -940,14 +994,12 @@ struct BenchmarkSuite {
         samples.append(contentsOf: mod2.modulateText(text2))
         samples.append(contentsOf: [Float](repeating: 0, count: postSamples))
 
-        // Demodulator starts at wpm1 and must adapt to wpm2
-        let demodulator = CWDemodulator(configuration: config1)
-        delegate.reset()
-        demodulator.delegate = delegate
-        demodulator.process(samples: samples)
+        // Decoder starts at wpm1 and must adapt to wpm2
+        let decoder = makeDecoder(configuration: config1)
+        decoder.process(samples: samples)
 
         let expectedFull = text1 + " " + text2
-        let decoded = delegate.decodedText
+        let decoded = decoder.decodedText
         let cer = characterErrorRate(expected: expectedFull, actual: decoded)
         return TestResult(category: category, name: name, expected: expectedFull, decoded: decoded, cer: cer, score: cerToScore(cer))
     }
@@ -1070,8 +1122,51 @@ struct BenchmarkSuite {
     }
 }
 
+// MARK: - Parameter Override (for automated optimization)
+
+var bayesianParams: BayesianCWParams?
+if let idx = CommandLine.arguments.firstIndex(of: "--bayesian-params"),
+   idx + 1 < CommandLine.arguments.count {
+    let path = CommandLine.arguments[idx + 1]
+    if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+       let params = try? JSONDecoder().decode(BayesianCWParams.self, from: data) {
+        bayesianParams = params
+        print("Loaded Bayesian params from \(path)")
+    } else {
+        print("Warning: could not load Bayesian params from \(path)")
+    }
+}
+
+let bayesianOnly = CommandLine.arguments.contains("--bayesian-only")
+let compareMode = CommandLine.arguments.contains("--compare")
+
 // MARK: - Main
 
-print("Starting CW benchmark...")
-var suite = BenchmarkSuite()
-suite.runAll()
+if bayesianOnly {
+    // Run only the Bayesian decoder (for Optuna optimization speed)
+    print("Starting CW benchmark (Bayesian only)...")
+    var suite = BenchmarkSuite()
+    suite.decoderMode = .bayesian
+    suite.bayesianParams = bayesianParams
+    suite.runAll()
+} else if compareMode {
+    // Run both classic and Bayesian, print comparison
+    print("Starting CW benchmark (compare mode)...")
+
+    print("\n>>> Running CLASSIC decoder...")
+    var classicSuite = BenchmarkSuite()
+    classicSuite.decoderMode = .classic
+    classicSuite.runAll()
+
+    print("\n>>> Running BAYESIAN decoder...")
+    var bayesianSuite = BenchmarkSuite()
+    bayesianSuite.decoderMode = .bayesian
+    bayesianSuite.bayesianParams = bayesianParams
+    bayesianSuite.runAll()
+} else {
+    // Default: run classic decoder only
+    print("Starting CW benchmark...")
+    var suite = BenchmarkSuite()
+    suite.decoderMode = .classic
+    suite.runAll()
+}

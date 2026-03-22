@@ -3,6 +3,7 @@
 //  AmateurDigitalCore
 //
 //  JS8Call encoder and modulator: text -> LDPC codeword -> 8-FSK tones -> audio.
+//  Delegates tone generation to GFSKModulator (shared physical layer).
 //
 
 import Foundation
@@ -10,10 +11,11 @@ import Foundation
 public struct JS8CallModulator {
 
     public private(set) var currentConfiguration: JS8CallConfiguration
-    private var phase: Double = 0
+    private var gfskModulator: GFSKModulator
 
     public init(configuration: JS8CallConfiguration = .standard) {
         self.currentConfiguration = configuration
+        self.gfskModulator = GFSKModulator(config: configuration.gfskConfig)
     }
 
     // MARK: - Tone Encoding
@@ -22,80 +24,20 @@ public struct JS8CallModulator {
     public func encodeTones(message: String, frameType: Int = 0) -> [Int] {
         let msgbits = JS8CallCodec.pack(message: message, frameType: frameType)
         let codeword = LDPC174_87.encode(msgbits)
-        return mapToTones(codeword: codeword)
-    }
-
-    /// Map a 174-bit LDPC codeword to 79 channel symbols with Costas sync interleaving.
-    private func mapToTones(codeword: [UInt8]) -> [Int] {
-        let costas = currentConfiguration.submode.costas
-        var itone = [Int](repeating: 0, count: JS8CallConstants.NN)
-
-        // Insert Costas sync arrays
-        for i in 0..<7 { itone[i] = costas.a[i] }
-        for i in 0..<7 { itone[36 + i] = costas.b[i] }
-        for i in 0..<7 { itone[JS8CallConstants.NN - 7 + i] = costas.c[i] }
-
-        // Fill data symbols (58 total, 3 bits each from the 174-bit codeword)
-        var k = 7  // Start after first Costas
-        for j in 1...JS8CallConstants.ND {
-            let i = 3 * j - 3
-            if j == 30 { k += 7 }  // Skip middle Costas block
-            itone[k] = Int(codeword[i]) * 4 + Int(codeword[i + 1]) * 2 + Int(codeword[i + 2])
-            k += 1
-        }
-
-        return itone
+        return gfskModulator.mapCodewordToSymbols(codeword)
     }
 
     // MARK: - Audio Generation
 
     /// Generate 8-FSK audio at the internal 12 kHz sample rate from tone sequence.
     public mutating func generateAudioInternal(tones: [Int]) -> [Float] {
-        let nsps = currentConfiguration.submode.nsps
-        let sr = JS8CallConstants.internalSampleRate
-        let spacing = currentConfiguration.submode.toneSpacing
-        let carrier = currentConfiguration.carrierFrequency
-        let twopi = 2.0 * Double.pi
-
-        var samples = [Float]()
-        samples.reserveCapacity(JS8CallConstants.NN * nsps)
-
-        for i in 0..<JS8CallConstants.NN {
-            let freq = carrier + Double(tones[i]) * spacing
-            let dphi = twopi * freq / sr
-            for _ in 0..<nsps {
-                samples.append(Float(sin(phase)))
-                phase += dphi
-                if phase >= twopi { phase -= twopi }
-            }
-        }
-        return samples
+        return gfskModulator.generateAudioInternal(symbols: tones)
     }
 
     /// Generate audio at the external sample rate (default 48 kHz).
     /// Upsamples from 12 kHz using linear interpolation.
     public mutating func generateAudio(tones: [Int]) -> [Float] {
-        let internal12k = generateAudioInternal(tones: tones)
-        let factor = currentConfiguration.decimationFactor
-        if factor <= 1 { return internal12k }
-
-        // Upsample by linear interpolation
-        let outCount = internal12k.count * factor
-        var output = [Float](repeating: 0, count: outCount)
-        for i in 0..<internal12k.count - 1 {
-            let a = internal12k[i]
-            let b = internal12k[i + 1]
-            for j in 0..<factor {
-                let frac = Float(j) / Float(factor)
-                output[i * factor + j] = a + (b - a) * frac
-            }
-        }
-        // Last sample
-        let last = internal12k.count - 1
-        for j in 0..<factor {
-            output[last * factor + j] = internal12k[last]
-        }
-        return output
+        return gfskModulator.generateAudio(symbols: tones)
     }
 
     // MARK: - Convenience
@@ -145,6 +87,6 @@ public struct JS8CallModulator {
 
     /// Reset modulator phase state.
     public mutating func reset() {
-        phase = 0
+        gfskModulator.reset()
     }
 }

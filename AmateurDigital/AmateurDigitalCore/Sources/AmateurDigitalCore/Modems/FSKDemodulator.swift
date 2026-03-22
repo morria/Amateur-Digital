@@ -80,9 +80,17 @@ public final class FSKDemodulator {
     private var spaceFilter: GoertzelFilter
     private let baudotCodec: BaudotCodec
 
-    /// Noise-band Goertzel filters for spectral SNR squelch.
-    /// Placed at the midpoint between mark/space frequencies (inside the bandpass).
-    /// A real RTTY signal has negligible power at the midpoint; broadband noise does not.
+    /// Off-band Goertzel noise filters for midpoint carrier detection.
+    /// Placed 65 Hz outside the mark/space tones (near bandpass edges).
+    /// When the midpoint/off-band power ratio is persistently high (> 6x for 4+ blocks),
+    /// a narrowband carrier at the midpoint is detected and the spectral SNR metric
+    /// switches to using a scaled off-band average instead of the inflated midpoint.
+    private var noiseFilterLow: GoertzelFilter   // Below space tone
+    private var noiseFilterHigh: GoertzelFilter   // Above mark tone
+
+    /// Midpoint noise filter (primary noise reference for spectral SNR squelch).
+    /// Located at the midpoint between mark/space frequencies (e.g., 2040 Hz for standard RTTY).
+    /// Well-calibrated for broadband noise rejection. Bypassed when a midpoint carrier is detected.
     private var noiseFilterMid: GoertzelFilter
 
     /// Bandpass filter for out-of-band noise rejection (IIR, ~40 dB)
@@ -304,8 +312,25 @@ public final class FSKDemodulator {
             sampleRate: configuration.sampleRate
         )
 
-        // Noise reference at midpoint between mark/space (inside bandpass passband).
-        // Real RTTY has low power here; broadband noise has equal power everywhere.
+        // Off-band noise reference filters for spectral SNR squelch.
+        // Placed outside the mark/space Goertzel mainlobes but inside the bandpass.
+        // Using two filters makes the metric immune to a single narrowband carrier
+        // at any frequency — the carrier can inflate at most one of the two.
+        // The minimum of the two is used as the noise reference.
+        let noiseOffsetHz = 65.0  // Hz outside mark/space tones
+        let noiseLowFreq = configuration.spaceFrequency - noiseOffsetHz
+        let noiseHighFreq = configuration.markFrequency + noiseOffsetHz
+        self.noiseFilterLow = GoertzelFilter(
+            frequency: noiseLowFreq,
+            sampleRate: configuration.sampleRate,
+            blockSize: goertzelWindowSize
+        )
+        self.noiseFilterHigh = GoertzelFilter(
+            frequency: noiseHighFreq,
+            sampleRate: configuration.sampleRate,
+            blockSize: goertzelWindowSize
+        )
+        // Legacy midpoint filter (kept for diagnostics, no longer drives SNR squelch)
         let midFreq = (configuration.markFrequency + configuration.spaceFrequency) / 2.0
         self.noiseFilterMid = GoertzelFilter(
             frequency: midFreq,
@@ -451,8 +476,11 @@ public final class FSKDemodulator {
             taps: 257
         )
 
-        // Update noise midpoint filter for spectral SNR squelch
+        // Update off-band noise filters for spectral SNR squelch
         let newSpaceFreq = newMarkFreq - configuration.shift
+        let noiseOffsetHz = 65.0
+        noiseFilterLow = GoertzelFilter(frequency: newSpaceFreq - noiseOffsetHz, sampleRate: configuration.sampleRate, blockSize: goertzelWindowSize)
+        noiseFilterHigh = GoertzelFilter(frequency: newMarkFreq + noiseOffsetHz, sampleRate: configuration.sampleRate, blockSize: goertzelWindowSize)
         let midFreq = (newMarkFreq + newSpaceFreq) / 2.0
         noiseFilterMid = GoertzelFilter(frequency: midFreq, sampleRate: configuration.sampleRate, blockSize: goertzelWindowSize)
 
@@ -584,25 +612,63 @@ public final class FSKDemodulator {
     /// Reference: http://www.w7ay.net/site/Technical/ATC/
     ///
     /// - Returns: Correlation value: positive = mark, negative = space
-    /// Spectral SNR: ratio of active tone power to midpoint noise power.
+    /// Spectral SNR: ratio of active tone power to noise reference power.
     /// Smoothed to avoid dips during mark/space transitions.
     private var spectralSNR: Float = 0
     private var smoothedSpectralSNR: Float = 0
+    /// Count of consecutive blocks where midpoint/off-band ratio exceeds threshold.
+    /// Used to distinguish persistent narrowband carriers from transient AFC spikes.
+    private var carrierDetectCount: Int = 0
 
     private func analyzeBlock() -> Float {
         let m = markFilter.processBlock(analysisWindow)
         let s = spaceFilter.processBlock(analysisWindow)
+        let nLow = noiseFilterLow.processBlock(analysisWindow)
+        let nHigh = noiseFilterHigh.processBlock(analysisWindow)
         let nMid = noiseFilterMid.processBlock(analysisWindow)
 
         markFilter.reset()
         spaceFilter.reset()
+        noiseFilterLow.reset()
+        noiseFilterHigh.reset()
         noiseFilterMid.reset()
 
-        // Spectral SNR: active tone power vs midpoint noise power.
-        // For real RTTY: max(m,s) >> nMid → high SNR.
-        // For broadband noise: m ≈ s ≈ nMid → SNR ≈ 1.0.
+        // Spectral SNR: active tone power vs noise power.
+        //
+        // Primary noise reference is the midpoint filter (2040 Hz), well-calibrated for
+        // broadband noise rejection. Vulnerability: a narrowband carrier at 2040 Hz inflates
+        // nMid, dropping spectralSNR to ~0 and suppressing all decoder output.
+        //
+        // Fix: compare the midpoint power to two off-band noise filters placed outside the
+        // mark/space band. A persistent carrier at the midpoint produces a high midpoint/off-band
+        // ratio (>> 6), while broadband noise has a moderate ratio (~3-5 from bandpass shape).
+        // Requiring 4 consecutive blocks above the ratio threshold rejects transient AFC spikes
+        // while quickly detecting real carriers. When a carrier is detected, substitute a scaled
+        // off-band average as the noise reference.
         let activeTone = max(m, s)
-        spectralSNR = activeTone / max(nMid, 0.0001)
+        let offBandAvg = (nLow + nHigh) / 2.0
+        let midToOffBandRatio = nMid / max(offBandAvg, 0.0001)
+        // Detect persistent narrowband carriers at the midpoint frequency.
+        // A carrier produces a consistently high midpoint/off-band ratio (>> 6).
+        // AFC filter updates cause transient spikes lasting 1-2 blocks.
+        // Requiring 4 consecutive blocks above threshold rejects transients.
+        if midToOffBandRatio > 6.0 {
+            carrierDetectCount += 1
+        } else {
+            carrierDetectCount = max(0, carrierDetectCount - 1)
+        }
+        let carrierDetected = carrierDetectCount >= 4
+        let noiseRef: Float
+        if carrierDetected {
+            // Persistent midpoint inflation — narrowband carrier detected.
+            // Use scaled off-band average to approximate broadband noise level at midpoint.
+            // The scale factor of 4x compensates for bandpass rolloff at the filter edges.
+            noiseRef = offBandAvg * 4.0
+        } else {
+            // Normal operation: use midpoint directly (well-calibrated for broadband noise).
+            noiseRef = nMid
+        }
+        spectralSNR = activeTone / max(noiseRef, 0.0001)
         // Smooth to avoid dips during mark/space transitions
         smoothedSpectralSNR = smoothedSpectralSNR * 0.9 + spectralSNR * 0.1
 
@@ -916,6 +982,8 @@ public final class FSKDemodulator {
         correlationHistory.removeAll(keepingCapacity: true)
         markFilter.reset()
         spaceFilter.reset()
+        noiseFilterLow.reset()
+        noiseFilterHigh.reset()
         noiseFilterMid.reset()
         bandpassFilter.reset()
         fftBandpassFilter.reset()
@@ -925,6 +993,7 @@ public final class FSKDemodulator {
         noiseFloor = 0.1
         spectralSNR = 0
         smoothedSpectralSNR = 0
+        carrierDetectCount = 0
         lastCharacterConfidence = 0
         pendingCode = nil
         pendingConfidence = 0

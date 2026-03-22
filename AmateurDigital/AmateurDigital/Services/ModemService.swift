@@ -241,6 +241,9 @@ class ModemService: ObservableObject, @unchecked Sendable {
     // MARK: - CW Modem
 
     private var cwModem: CWModem?
+    private var bayesianCWDecoder: BayesianCWDecoder?
+    /// Which CW decoder is active on DSP queue: "classic" or "bayesian"
+    private var dspCWDecoderType: String = "classic"
 
     // MARK: - JS8Call Modem
 
@@ -276,7 +279,7 @@ class ModemService: ObservableObject, @unchecked Sendable {
             #endif
         case .cw:
             #if canImport(AmateurDigitalCore)
-            return cwModem != nil
+            return cwModem != nil || bayesianCWDecoder != nil
             #else
             return false
             #endif
@@ -397,6 +400,7 @@ class ModemService: ObservableObject, @unchecked Sendable {
         let rttySquelch = Float(settings.rttySquelch)
         let polarityInverted = settings.rttyPolarityInverted
         let freqOffset = settings.rttyFrequencyOffset
+        let cwDecoderType = settings.cwDecoderType
 
         // Synchronize modem creation with DSP queue
         dspQueue.sync { [self] in
@@ -429,8 +433,16 @@ class ModemService: ObservableObject, @unchecked Sendable {
                 multiChannelPSKDemodulator?.setSquelch(pskSquelch)
 
             case .cw:
-                cwModem = CWModem(configuration: cwConfig)
-                cwModem?.delegate = self
+                dspCWDecoderType = cwDecoderType
+                if cwDecoderType == "bayesian" {
+                    cwModem = nil
+                    bayesianCWDecoder = BayesianCWDecoder(configuration: cwConfig)
+                    bayesianCWDecoder?.delegate = self
+                } else {
+                    bayesianCWDecoder = nil
+                    cwModem = CWModem(configuration: cwConfig)
+                    cwModem?.delegate = self
+                }
 
             case .js8call:
                 js8callModem = JS8CallModem(configuration: .normal)
@@ -497,6 +509,7 @@ class ModemService: ObservableObject, @unchecked Sendable {
         let pskSquelch = Float(settings.psk31Squelch)
         let rttySquelch = Float(settings.rttySquelch)
         let cwToneFreq = settings.cwToneFrequency
+        let cwDecoderType = settings.cwDecoderType
         #endif
 
         // Synchronize modem creation with DSP queue (blocks briefly to prevent races)
@@ -509,6 +522,7 @@ class ModemService: ObservableObject, @unchecked Sendable {
             cachedRTTYSquelch = rttySquelch
             cachedPSKSquelch = pskSquelch
             cachedCWToneFreq = cwToneFreq
+            dspCWDecoderType = cwDecoderType
             #endif
             dspActiveMode = mode
             pendingChars.removeAll(keepingCapacity: true)
@@ -535,8 +549,13 @@ class ModemService: ObservableObject, @unchecked Sendable {
                 multiChannelPSKDemodulator?.setSquelch(pskSquelch)
 
             case .cw:
-                cwModem = CWModem(configuration: cwConfig)
-                cwModem?.delegate = self
+                if cwDecoderType == "bayesian" {
+                    bayesianCWDecoder = BayesianCWDecoder(configuration: cwConfig)
+                    bayesianCWDecoder?.delegate = self
+                } else {
+                    cwModem = CWModem(configuration: cwConfig)
+                    cwModem?.delegate = self
+                }
 
             case .olivia:
                 break
@@ -581,6 +600,7 @@ class ModemService: ObservableObject, @unchecked Sendable {
         pskModem?.reset()
         multiChannelPSKDemodulator?.reset()
         cwModem?.reset()
+        bayesianCWDecoder?.reset()
         js8callModem?.reset()
         #endif
 
@@ -630,9 +650,14 @@ class ModemService: ObservableObject, @unchecked Sendable {
                 DispatchQueue.main.async { [weak self] in self?.channelFrequencies = freqs }
             }
         case .cw:
-            if cwModem == nil, let config = cachedCWConfig {
-                cwModem = CWModem(configuration: config)
-                cwModem?.delegate = self
+            if cwModem == nil && bayesianCWDecoder == nil, let config = cachedCWConfig {
+                if dspCWDecoderType == "bayesian" {
+                    bayesianCWDecoder = BayesianCWDecoder(configuration: config)
+                    bayesianCWDecoder?.delegate = self
+                } else {
+                    cwModem = CWModem(configuration: config)
+                    cwModem?.delegate = self
+                }
                 let freq = cachedCWToneFreq
                 DispatchQueue.main.async { [weak self] in self?.channelFrequencies = [freq] }
             }
@@ -704,9 +729,15 @@ class ModemService: ObservableObject, @unchecked Sendable {
             newDecoding = pskModem?.isSignalDetected ?? false
 
         case .cw:
-            cwModem?.process(samples: samples)
-            newStrength = cwModem?.signalStrength ?? 0
-            newDecoding = cwModem?.isSignalDetected ?? false
+            if dspCWDecoderType == "bayesian", let bayes = bayesianCWDecoder {
+                bayes.process(samples: samples)
+                newStrength = bayes.signalStrength
+                newDecoding = bayes.signalDetected
+            } else {
+                cwModem?.process(samples: samples)
+                newStrength = cwModem?.signalStrength ?? 0
+                newDecoding = cwModem?.isSignalDetected ?? false
+            }
 
         case .olivia:
             break
@@ -1295,6 +1326,30 @@ extension ModemService: CWModemDelegate {
 
     nonisolated func modem(
         _ modem: CWModem,
+        signalDetected detected: Bool,
+        atFrequency frequency: Double
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isDecoding = detected
+            self.delegate?.modemService(self, signalDetected: detected, onChannel: frequency, mode: .cw)
+        }
+    }
+}
+
+// MARK: - BayesianCWDecoderDelegate
+
+extension ModemService: BayesianCWDecoderDelegate {
+    nonisolated func bayesianDecoder(
+        _ decoder: BayesianCWDecoder,
+        didDecode character: Character,
+        atFrequency frequency: Double
+    ) {
+        pendingChars.append((character, frequency, .cw, decoder.signalStrength))
+    }
+
+    nonisolated func bayesianDecoder(
+        _ decoder: BayesianCWDecoder,
         signalDetected detected: Bool,
         atFrequency frequency: Double
     ) {

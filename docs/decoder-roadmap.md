@@ -234,8 +234,9 @@ Layer 3: Agentic Algorithm Improvement (Claude Code /improve-decoders)
 | 36 | Bench | CW auroral flutter | +3 tests, 100% | CW handles 10-50 Hz Doppler perfectly. Goertzel averaging smooths flutter. CW 99 tests, composite 91.3 |
 | 37 | Infra | Verification + commit | 351/351 tests pass | All accumulated work verified. 1Password blocking commit — changes in working tree. |
 | 38 | Status | Machine at steady state | All conditions tested | 393 benchmark tests, parameters optimal, remaining improvements need architectural changes |
+| 39+ | Parallel | 8 architectural teammates | 6 merged, 3 running | BayesianCW, GFSK layer, FT8 codec+UI, 2Tone RTTY, BayesianCW integration all merged. Spectral SNR fix, W7AY ERC, Optuna CW optimizer still running. |
 
-### Key Principles (Learned Over 38 Iterations)
+### Key Principles (Learned Over 38+ Iterations)
 
 1. **Algorithmic changes >> parameter tweaks.** The only committed decoder improvement was replacing an algorithm (ATC → simple correlation). All ~20 parameter tweaks caused regressions.
 
@@ -247,6 +248,89 @@ Layer 3: Agentic Algorithm Improvement (Claude Code /improve-decoders)
 
 5. **DSP parameters are tightly coupled.** Envelope tracking rates, filter bandwidths, and squelch thresholds are jointly optimized. Changing one cascades to others.
 
-6. **Run-to-run variance exists.** CW scores vary ±2 points between runs due to marginal threshold decisions. Average over 3+ runs for reliable comparisons.
+6. **Parallel worktree agents scale well.** Launching 8 isolated teammates for architectural changes produces more in one session than 38 sequential iterations. Each worktree is independently testable.
 
-7. **Real-world robustness comes from the signal chain, not just the decoder.** Bandpass filtering, frequency selectivity, and normalization provide most of the noise/interference rejection.
+7. **New decoders need parameter optimization.** BayesianCW scores 84.4 vs classic 97.8 — the algorithm is sound but defaults need Optuna tuning. First implementations are starting points, not finished products.
+
+---
+
+## 4. Software Quality
+
+### Patch Quality Assessment
+
+**What's working well:**
+- Commits include benchmark scores in messages (easy to track progress)
+- 401 unit tests all passing (351 original + 50 FT8 codec)
+- Regression guard prevented ~25 bad changes from being committed
+- Benchmark JSON output enables automated analysis
+
+**What needs improvement:**
+
+| Issue | Impact | Fix |
+|-------|--------|-----|
+| **Giant commits** (57 files/14K lines in b627c50) | Hard to review, hard to revert pieces | Break into focused PRs: decoder changes separate from benchmark changes separate from UI |
+| **No CI** (.github/workflows/ referenced in CLAUDE.md but doesn't exist) | Regressions only caught manually | Add GitHub Actions: `swift build && swift test` on push/PR |
+| **8 new files with zero unit tests** (GFSK layer, BayesianCW, SelectiveRTTY) | Regressions can sneak in | Add round-trip tests for each new component |
+| **1Password blocking commits** | Accumulates uncommitted work risk | Use HTTPS remote or deploy key instead of SSH |
+| **Worktree merges are manual copy** | Error-prone, can miss files | Use `git merge` from worktree branches instead of file copies |
+| **No benchmark in CI** | Score regressions only caught by manual runs | Add benchmark score check to CI (fail if composite drops >0.5) |
+| **Benchmark takes 45 min for JS8** | Can't run full suite in CI | Add `--quick` flag for CI (subset of tests, ~2 min) |
+
+### Test Coverage Gaps
+
+**Tested (with unit tests):**
+- Codecs: BaudotCodec, VaricodeCodec, FT8Codec, ConvolutionalCodec
+- Modulators: FSKModulator, PSKModulator (round-trip tests)
+- Demodulators: FSKDemodulator, PSKDemodulator (round-trip tests)
+- Filters: GoertzelFilter, BandpassFilter, SineGenerator
+- Integration: MultiChannelRTTY, JS8Call round-trip
+
+**NOT tested (missing unit tests):**
+- BayesianCWDecoder (462 lines, 0 tests)
+- SelectiveRTTYDecoder (320 lines, 0 tests)
+- GFSKModulator, GFSKSyncSearch, GFSKSymbolExtractor, GFSKDecoder (790 lines, 0 tests)
+- CWDemodulator, CWModulator, CWModem (existing, never had unit tests)
+- OverlapAddFilter, FFTProcessor, WattersonChannel (DSP building blocks)
+- MorseCodec (used by CW, no direct tests)
+- LDPC174_87 (critical codec, no direct tests)
+
+**Benchmark tests vs unit tests:**
+- Benchmarks test the full decode pipeline end-to-end (393 tests)
+- Unit tests test individual components in isolation (401 tests)
+- Gap: new components (GFSK, Bayesian, Selective) have benchmark coverage via the full pipeline but NO isolation tests. A bug in GFSKSyncSearch could be masked by the JS8 demodulator's error handling.
+
+### Recommended Software Quality Improvements
+
+**Priority 1 — CI Pipeline (1 day)**
+```yaml
+# .github/workflows/test.yml
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: cd AmateurDigital/AmateurDigitalCore && swift build
+      - run: cd AmateurDigital/AmateurDigitalCore && swift test
+      - run: cd AmateurDigital/AmateurDigitalCore && swift run -c release RTTYBenchmark 2>&1 | tee /tmp/bench.txt
+      - run: python3 -c "import json; s=json.load(open('/tmp/rtty_benchmark_latest.json'))['composite_score']; assert s >= 88.0, f'Regression: {s}'"
+```
+
+**Priority 2 — Unit tests for new code (2 days)**
+- GFSK round-trip: modulate symbols → sync search → extract → verify symbols match
+- BayesianCW: feed known CW audio → verify decoded characters
+- SelectiveRTTY: feed known RTTY audio → verify decoded text
+- MorseCodec: encode → decode round-trip for all characters
+- LDPC: encode → corrupt → decode → verify recovery
+
+**Priority 3 — Smaller commits (process change)**
+- Decoder changes: 1 commit per decoder modification + benchmark result
+- Benchmark additions: 1 commit per new test category
+- New files: 1 commit per logical component (not 57 files at once)
+- Never mix iOS app changes with core library changes
+
+**Priority 4 — Automated benchmark regression (1 day)**
+- Store baseline scores in `benchmarks/baselines.json`
+- CI compares current scores against baselines
+- PR comment shows score diff table
+- Block merge if any category regresses >0.5 points
