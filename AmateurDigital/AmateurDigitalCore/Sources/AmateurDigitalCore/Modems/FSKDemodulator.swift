@@ -657,17 +657,48 @@ public final class FSKDemodulator {
         // The envelope tracking is kept for signal strength reporting and squelch,
         // but is no longer used for the correlation/bit decision.
         //
-        // Scale by spectral SNR confidence to suppress noise-induced false correlations.
-        // Real RTTY: spectralSNR >> 2 → confidence ≈ 1.0 → correlation unchanged.
-        // Broadband noise: spectralSNR ≈ 1.0 → confidence ≈ 0.0 → correlation near 0.
-        // This replaces the ATC's envelope-based noise rejection with spectral-based rejection.
+        // Spectral SNR confidence to suppress noise-induced false correlations.
         let snrConfidence: Float
         if goertzelWindowSize >= 400 {
             snrConfidence = min(1.0, max(0, (smoothedSpectralSNR - 1.5) / 2.0))
         } else {
-            snrConfidence = 1.0  // At high baud rates, spectral SNR not available
+            snrConfidence = 1.0
         }
-        let correlation = simpleCorrelation * snrConfidence
+        let simpleResult = simpleCorrelation * snrConfidence
+
+        // Also compute ATC correlation (W7AY formula) for hybrid decision.
+        // ATC handles space-side fading and adjacent interference better;
+        // simple correlation handles mark-side fading better.
+        let envelopeReady = markEnvelope > 0.001 && spaceEnvelope > 0.001
+        let atcResult: Float
+        if envelopeReady {
+            let nf = atcNoiseFloor
+            let mClipped = max(0 as Float, min(m - nf, markEnvelope - nf))
+            let sClipped = max(0 as Float, min(s - nf, spaceEnvelope - nf))
+            let envM = max(0 as Float, markEnvelope - nf)
+            let envS = max(0 as Float, spaceEnvelope - nf)
+            let mProduct = mClipped * envM
+            let sProduct = sClipped * envS
+            let ratio = max(envM, envS) / max(min(envM, envS), 0.0001 as Float)
+            let bias: Float = ratio > 2.0 ? 0.5 : (ratio > 1.41 ? 0.15 + (ratio - 1.41) / 0.59 * 0.35 : 0.15)
+            let v = (mProduct - sProduct) - bias * (envM * envM - envS * envS)
+            let scale = max(bias * (envM * envM + envS * envS), 0.0001 as Float)
+            atcResult = max(-1.0, min(1.0, v / scale))
+        } else {
+            atcResult = simpleResult  // No envelope data → fall back
+        }
+
+        // Hybrid: use ATC only when signal is clearly present (spectralSNR > 5),
+        // ATC has larger magnitude, and both agree on sign. This prevents the ATC
+        // from amplifying noise-induced false correlations during noise-only conditions.
+        let useHybrid = envelopeReady && goertzelWindowSize >= 400 && smoothedSpectralSNR > 5.0
+        let atcScaled = atcResult * snrConfidence
+        let correlation: Float
+        if useHybrid && abs(atcScaled) > abs(simpleResult) && atcScaled * simpleResult >= 0 {
+            correlation = atcScaled  // ATC is stronger, signal confirmed → use it
+        } else {
+            correlation = simpleResult  // Simple is stronger or they disagree → use simple
+        }
         return polarityInverted ? -correlation : correlation
     }
 

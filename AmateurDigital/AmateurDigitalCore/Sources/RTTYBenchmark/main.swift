@@ -118,6 +118,41 @@ func applyClipping(to signal: [Float], clipFraction: Float) -> [Float] {
     return signal.map { max(-clipLevel, min(clipLevel, $0)) }
 }
 
+/// Apply AGC pumping: sinusoidal gain modulation simulating a nearby strong station
+/// keying on/off, causing the receiver AGC to modulate the desired signal.
+/// - `depthDB`: peak-to-peak gain variation in dB (typical: 6-15 dB)
+/// - `rateHz`: pumping rate in Hz (typical: 2-5 Hz, matches CW/SSB keying rate)
+func applyAGCPumping(to signal: [Float], depthDB: Float, rateHz: Double, sampleRate: Double = 48000) -> [Float] {
+    let phaseInc = 2.0 * .pi * rateHz / sampleRate
+    var phase = 0.0
+    return signal.map { sample in
+        // Gain oscillates between 1/halfDepth and halfDepth (centered at 1.0 in log space)
+        let gainDB = depthDB * Float(cos(phase)) / 2.0
+        let gain = pow(10.0, gainDB / 20.0)
+        phase += phaseInc
+        return sample * gain
+    }
+}
+
+/// Resample signal to simulate sample rate mismatch (e.g., 48000 vs 47950 Hz).
+/// Uses linear interpolation. The ratio determines the pitch/timing shift.
+func resample(signal: [Float], fromRate: Double, toRate: Double) -> [Float] {
+    let ratio = fromRate / toRate
+    let outLength = Int(Double(signal.count) / ratio)
+    var result = [Float](repeating: 0, count: outLength)
+    for i in 0..<outLength {
+        let srcPos = Double(i) * ratio
+        let srcIdx = Int(srcPos)
+        let frac = Float(srcPos - Double(srcIdx))
+        if srcIdx + 1 < signal.count {
+            result[i] = signal[srcIdx] * (1.0 - frac) + signal[srcIdx + 1] * frac
+        } else if srcIdx < signal.count {
+            result[i] = signal[srcIdx]
+        }
+    }
+    return result
+}
+
 func addWhiteNoise(to signal: [Float], snrDB: Float, rng: inout SeededRandom) -> [Float] {
     let signalPower = signal.map { $0 * $0 }.reduce(0, +) / max(1, Float(signal.count))
     let signalRMS = sqrt(signalPower)
@@ -385,6 +420,7 @@ struct BenchmarkSuite {
         runFrequencyDriftTests()
         runFlatFadingTests()
         runITUChannelTests()
+        runAuroralFlutterTests()
         runCombinedImpairmentTests()
         runLongMessageTests()
         runImpulseNoiseTests()
@@ -624,6 +660,63 @@ struct BenchmarkSuite {
             results.append(result)
             printResult(result)
         }
+        print()
+    }
+
+    // MARK: - Auroral Flutter Tests
+
+    mutating func runAuroralFlutterTests() {
+        print("--- Auroral Flutter Tests (trans-polar paths) ---")
+        let text = "CQ CQ CQ DE W1AW K"
+
+        // Mild auroral flutter: 10 Hz Doppler spread, 1.0 ms multipath
+        // This is the onset of auroral conditions (Kp ~4)
+        let r1 = runTest(
+            category: "auroral_flutter", name: "mild_10Hz",
+            config: .standard, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 10, pathDelay: 0.001, seed: 1300)
+                return channel.process(samples)
+            }
+        )
+        results.append(r1); printResult(r1)
+
+        // Moderate auroral flutter: 25 Hz Doppler, 2.0 ms multipath
+        let r2 = runTest(
+            category: "auroral_flutter", name: "moderate_25Hz",
+            config: .standard, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 25, pathDelay: 0.002, seed: 1301)
+                return channel.process(samples)
+            }
+        )
+        results.append(r2); printResult(r2)
+
+        // Severe auroral flutter: 50 Hz Doppler, 2.0 ms multipath
+        // This destroys narrowband modes (PSK31 symbol rate is only 31.25 Hz)
+        let r3 = runTest(
+            category: "auroral_flutter", name: "severe_50Hz",
+            config: .standard, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 50, pathDelay: 0.002, seed: 1302)
+                return channel.process(samples)
+            }
+        )
+        results.append(r3); printResult(r3)
+
+        // Mild flutter + 15 dB noise (realistic trans-polar 20m)
+        let r4 = runTest(
+            category: "auroral_flutter", name: "mild_10Hz_15dBnoise",
+            config: .standard, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 10, pathDelay: 0.001, seed: 1303)
+                let faded = channel.process(samples)
+                var rng = SeededRandom(seed: 1304)
+                return addWhiteNoise(to: faded, snrDB: 15, rng: &rng)
+            }
+        )
+        results.append(r4); printResult(r4)
+
         print()
     }
 
@@ -901,6 +994,30 @@ struct BenchmarkSuite {
         )
         results.append(r4); printResult(r4)
 
+        // AGC pumping: 10 dB depth at 3 Hz (nearby CW station keying)
+        let r5 = runTest(
+            category: "equipment", name: "agc_pump_10dB_3Hz",
+            config: .standard, text: text,
+            impairment: { samples in applyAGCPumping(to: samples, depthDB: 10, rateHz: 3) }
+        )
+        results.append(r5); printResult(r5)
+
+        // Severe AGC pumping: 15 dB depth at 5 Hz (strong SSB station nearby)
+        let r6 = runTest(
+            category: "equipment", name: "agc_pump_15dB_5Hz",
+            config: .standard, text: text,
+            impairment: { samples in applyAGCPumping(to: samples, depthDB: 15, rateHz: 5) }
+        )
+        results.append(r6); printResult(r6)
+
+        // Sample rate mismatch: 48000 vs 47950 Hz (50 ppm clock error)
+        let r7 = runTest(
+            category: "equipment", name: "samplerate_mismatch_50ppm",
+            config: .standard, text: text,
+            impairment: { samples in resample(signal: samples, fromRate: 48000, toRate: 47950) }
+        )
+        results.append(r7); printResult(r7)
+
         print()
     }
 
@@ -1012,6 +1129,7 @@ struct BenchmarkSuite {
             "itu_channel":      2.5,   // ITU standard HF propagation
             "combined":         3.0,
             "long_message":     2.0,   // Realistic QSO-length messages
+            "auroral_flutter":  2.0,   // Trans-polar path degradation
             "impulse_noise":    2.5,   // Real-world HF below 14 MHz (non-Gaussian)
             "equipment":        1.5,   // Sound card issues, ground loops
             "false_positive":   1.5,

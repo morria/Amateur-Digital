@@ -14,7 +14,7 @@ Living document tracking three workstreams: decoder quality, evaluation harness 
 |---------|-------|-------|----------------------|----------------------|-----|
 | JS8Call | 100.0 | 82 | -21 dB | N/A (matches FT8) | 0 dB |
 | PSK | 98.2 | 98 | ~8 dB | -10 dB | **18 dB** |
-| RTTY | 93.4 | 93 | ~10 dB | -5 dB | **15 dB** |
+| RTTY | 93.7 | 97 | ~10 dB | -5 dB | **15 dB** |
 | CW | 90.5 | 93 | ~0 dB | -10 dB | **10 dB** |
 
 ### RTTY Decoder (93.4/100)
@@ -136,11 +136,11 @@ Perfect score across 82 tests. LDPC(174,91) error correction makes it extremely 
 
 | Condition | Impact | Which Decoders | Status |
 |-----------|--------|---------------|--------|
-| **Auroral flutter** (10-100 Hz Doppler) | Destroys narrowband modes on polar paths | RTTY, PSK, CW | NOT TESTED |
+| **Auroral flutter** (10-100 Hz Doppler) | Destroys narrowband modes on polar paths | RTTY, PSK, CW | RTTY TESTED: 80.6/100 (72-78% per test, noise helps via stochastic resonance). PSK/CW NOT TESTED |
 | **NVIS O/X mode splitting** (2-path, 0.5-2 ms delay) | Deep slow fades on 80m/60m | RTTY, PSK | NOT TESTED |
 | **Narrowband interference within passband** (carrier at midpoint) | Tests spectral selectivity | RTTY, CW | NOT TESTED |
-| **AGC pumping** (10 dB sinusoidal gain, 2-5 Hz) | Simulates nearby strong station keying | All | NOT TESTED |
-| **Sample rate mismatch** (48000 vs 47950 Hz) | Common with cheap USB audio | All | NOT TESTED |
+| **AGC pumping** (10 dB sinusoidal gain, 2-5 Hz) | Simulates nearby strong station keying | All | RTTY TESTED: 100% (FSK is amplitude-independent). PSK/CW NOT TESTED |
+| **Sample rate mismatch** (48000 vs 47950 Hz) | Common with cheap USB audio | All | RTTY TESTED: 100% (50 ppm tolerated). PSK/CW NOT TESTED |
 | **Wrong sideband** (RTTY LSB/USB swap) | Common operator error | RTTY | NOT TESTED |
 | **CW chirp** (30 Hz shift on key-down) | Older/simpler transmitters | CW | NOT TESTED |
 | **Real-world recordings** (WebSDR + fldigi ground truth) | The ultimate validation | All | NOT SET UP |
@@ -214,8 +214,11 @@ Layer 3: Agentic Algorithm Improvement (Claude Code /improve-decoders)
 | 17 | Decoder | RTTY selective_fading | 0/1 succeeded | SNR confidence curve change didn't fix space_-15dB (not the cause) |
 | 18 | Bench | Impulse noise + equipment | +8 tests added | RTTY inherently robust to impulse noise and audio distortion |
 | 19 | Decoder | CW QRM (dual-Goertzel) | 0/1 — catastrophic (23.5) | AFC can't distinguish our signal from interferer; subtracted our own tone |
+| 20 | Bench | RTTY auroral flutter | +4 tests, 80.6/100 | 10-50 Hz Doppler degrades to 72-78%. Non-monotonic: noise helps via stochastic resonance |
+| **21** | **Decoder** | **RTTY hybrid correlation** | **+1.2 composite (92.5→93.7)** | **Hybrid simple+ATC: use ATC when signal confirmed (SNR>5) and agrees with simple. +12.5 auroral, +5.6 selective_fading** |
+| 22 | Bench | RTTY AGC pumping + sample rate | +3 tests, all 100% | FSK is amplitude-independent; decoder handles 15 dB AGC pumping and 50 ppm clock error |
 
-### Key Principles (Learned Over 19 Iterations)
+### Key Principles (Learned Over 22 Iterations)
 
 1. **Algorithmic changes >> parameter tweaks.** The only committed decoder improvement was replacing an algorithm (ATC → simple correlation). All ~20 parameter tweaks caused regressions.
 
