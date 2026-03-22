@@ -11,8 +11,11 @@ import Foundation
 import CoreLocation
 import Combine
 
+/// Settings are backed by UserDefaults and iCloud KVS, both of which are thread-safe for reads.
+/// @unchecked Sendable allows ModemService to read settings from its DSP queue.
+/// Writes still happen on @MainActor (UI actions) via the @Published didSet pattern.
 @MainActor
-class SettingsManager: NSObject, ObservableObject {
+class SettingsManager: NSObject, ObservableObject, @unchecked Sendable {
     static let shared = SettingsManager()
 
     // MARK: - Storage

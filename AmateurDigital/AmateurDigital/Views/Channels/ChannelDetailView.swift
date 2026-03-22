@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct ChannelDetailView: View {
     let channelID: UUID
@@ -132,7 +133,15 @@ struct ChannelDetailView: View {
                                 )
                                 .id(message.id)
                                 .offset(x: dragOffset)
+                                .transition(
+                                    .asymmetric(
+                                        insertion: .scale(scale: 0.85, anchor: message.direction == .sent ? .bottomTrailing : .bottomLeading)
+                                            .combined(with: .opacity),
+                                        removal: .opacity
+                                    )
+                                )
                             }
+                            .animation(.spring(response: 0.35, dampingFraction: 0.75), value: channel.messages.count)
 
                             // Live decoding buffer
                             if !channel.decodingBuffer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -205,6 +214,13 @@ struct ChannelDetailView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .background(Color.orange.opacity(0.1))
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .task {
+                            try? await Task.sleep(nanoseconds: 4_000_000_000)
+                            withAnimation {
+                                viewModel.frequencyWarning = nil
+                            }
+                        }
                     } else if !isFrequencySafe {
                         HStack {
                             Image(systemName: "exclamationmark.triangle.fill")
@@ -283,7 +299,8 @@ struct ChannelDetailView: View {
                         }
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    AudioLevelIndicator(level: viewModel.inputLevel)
                     Button {
                         showingChannelSettings = true
                     } label: {
@@ -295,6 +312,22 @@ struct ChannelDetailView: View {
                 ChannelSettingsSheet(channel: channel, viewModel: viewModel)
                     .id(channel.id) // Force recreation to ensure onAppear fires
             }
+            .onAppear {
+                // Restore draft message
+                if let draft = viewModel.draftMessages[channelID], !draft.isEmpty {
+                    messageText = draft
+                }
+                // Mark channel as read
+                viewModel.markChannelAsRead(channelID)
+            }
+            .onDisappear {
+                // Save draft message
+                if messageText.isEmpty {
+                    viewModel.draftMessages[channelID] = nil
+                } else {
+                    viewModel.draftMessages[channelID] = messageText
+                }
+            }
         } else {
             ContentUnavailableView("Channel Deleted", systemImage: "trash")
         }
@@ -305,9 +338,45 @@ struct ChannelDetailView: View {
         // Use placeholder message if text field is empty (last sent message, or CQ if none)
         let textToSend = messageText.isEmpty ? inputPlaceholder : messageText
         guard !textToSend.isEmpty else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         viewModel.sendMessage(textToSend, toChannel: channel)
         messageText = ""
+        viewModel.draftMessages[channelID] = nil
         isTextFieldFocused = false
+    }
+}
+
+// MARK: - Audio Level Indicator
+
+/// Compact 5-bar signal level indicator for toolbar use
+struct AudioLevelIndicator: View {
+    let level: Float
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 1.5) {
+            ForEach(0..<5, id: \.self) { i in
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(barActive(i) ? barColor(i) : Color(.systemGray4))
+                    .frame(width: 3, height: CGFloat(4 + i * 3))
+            }
+        }
+        .frame(height: 16)
+    }
+
+    private var normalizedLevel: CGFloat {
+        let clamped = max(Float(0.001), min(1, level))
+        let db = 20 * log10(clamped) // -60 to 0
+        return CGFloat(max(0, (db + 60) / 60))
+    }
+
+    private func barActive(_ index: Int) -> Bool {
+        normalizedLevel > CGFloat(index) / 5.0
+    }
+
+    private func barColor(_ index: Int) -> Color {
+        if index >= 4 { return .red }
+        if index >= 3 { return .yellow }
+        return .green
     }
 }
 

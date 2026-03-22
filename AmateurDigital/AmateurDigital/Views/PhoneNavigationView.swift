@@ -42,10 +42,48 @@ struct PhoneNavigationView: View {
                     LazyVGrid(columns: columns, spacing: 16) {
                         ForEach(ModeConfig.allEnabledModes) { mode in
                             ModeCard(mode: mode, isSelected: false) {
-                                navigationPath.append(mode)
+                                if mode == .cw {
+                                    // CW: single conversation — skip channel list,
+                                    // go directly to the one shared CW channel.
+                                    viewModel.selectedMode = .cw
+                                    Task { await viewModel.startAudioService() }
+                                    let channel = viewModel.getOrCreateComposeChannel()
+                                    navigationPath.append(channel)
+                                } else {
+                                    navigationPath.append(mode)
+                                }
                             }
                         }
                     }
+                    .padding(.horizontal, 20)
+
+                    // Detect Mode button
+                    Button {
+                        navigationPath.append("modeDetection")
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "waveform.badge.magnifyingglass")
+                                .font(.system(size: 20))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Detect Mode")
+                                    .font(.headline)
+                                Text("Listen and identify the signal")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color(.systemBackground))
+                                .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 4)
+                        )
+                    }
+                    .buttonStyle(.plain)
                     .padding(.horizontal, 20)
 
                     Spacer(minLength: 40)
@@ -63,6 +101,11 @@ struct PhoneNavigationView: View {
             }
             .sheet(isPresented: $showingSettings) {
                 SettingsView(chatViewModel: viewModel, filterMode: nil)
+            }
+            .navigationDestination(for: String.self) { value in
+                if value == "modeDetection" {
+                    ModeDetectionView(navigationPath: $navigationPath)
+                }
             }
             .navigationDestination(for: DigitalMode.self) { mode in
                 ChannelListContainer(mode: mode, navigationPath: $navigationPath)

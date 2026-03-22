@@ -13,6 +13,7 @@ struct iPadNavigationView: View {
     @State private var selectedChannel: Channel?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var showingSettings = false
+    @SceneStorage("iPadSelectedMode") private var storedModeRawValue: String = ""
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -60,7 +61,16 @@ struct iPadNavigationView: View {
         .sheet(isPresented: $showingSettings) {
             SettingsView(chatViewModel: viewModel, filterMode: selectedMode)
         }
+        .onAppear {
+            // Restore previously selected mode from scene storage
+            if selectedMode == nil, !storedModeRawValue.isEmpty {
+                selectedMode = DigitalMode(rawValue: storedModeRawValue)
+            }
+        }
         .onChange(of: selectedMode) { oldMode, newMode in
+            // Persist selection for state restoration
+            storedModeRawValue = newMode?.rawValue ?? ""
+
             // Clear channel selection when mode changes
             if oldMode != newMode {
                 selectedChannel = nil
@@ -75,6 +85,12 @@ struct iPadNavigationView: View {
                     Task {
                         await viewModel.startAudioService()
                     }
+                }
+                // CW: single conversation — auto-select the shared channel
+                // so the detail column shows immediately without requiring
+                // the user to tap a channel in the content column.
+                if mode == .cw {
+                    selectedChannel = viewModel.getOrCreateComposeChannel()
                 }
             } else {
                 viewModel.stopListening()
@@ -92,6 +108,8 @@ struct iPadChannelListView: View {
     @EnvironmentObject var viewModel: ChatViewModel
     @State private var channelForSettings: Channel?
     @State private var showingSettings = false
+    @State private var channelToDelete: Channel?
+    @State private var showClearAllConfirmation = false
 
     var body: some View {
         let visibleChannels = viewModel.channels.filter { $0.hasContent }
@@ -144,14 +162,11 @@ struct iPadChannelListView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(visibleChannels.sorted { $0.frequency < $1.frequency }, selection: $selectedChannel) { channel in
-                    ChannelRowView(channel: channel)
+                    ChannelRowView(channel: channel, unreadCount: viewModel.unreadCount(for: channel))
                         .tag(channel)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
-                                if selectedChannel?.id == channel.id {
-                                    selectedChannel = nil
-                                }
-                                viewModel.deleteChannel(channel)
+                                channelToDelete = channel
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -181,6 +196,8 @@ struct iPadChannelListView: View {
             }
 
             ToolbarItemGroup(placement: .topBarTrailing) {
+                AudioLevelIndicator(level: viewModel.inputLevel)
+
                 // Compose button
                 Button {
                     let channel = viewModel.getOrCreateComposeChannel()
@@ -190,8 +207,7 @@ struct iPadChannelListView: View {
                 }
 
                 Button {
-                    viewModel.clearAllChannels()
-                    selectedChannel = nil
+                    showClearAllConfirmation = true
                 } label: {
                     Image(systemName: "trash")
                 }
@@ -210,6 +226,39 @@ struct iPadChannelListView: View {
         }
         .sheet(isPresented: $showingSettings) {
             SettingsView(chatViewModel: viewModel, filterMode: mode)
+        }
+        .confirmationDialog(
+            "Delete Channel?",
+            isPresented: Binding(
+                get: { channelToDelete != nil },
+                set: { if !$0 { channelToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let channel = channelToDelete {
+                    if selectedChannel?.id == channel.id {
+                        selectedChannel = nil
+                    }
+                    viewModel.deleteChannel(channel)
+                }
+            }
+        } message: {
+            if let channel = channelToDelete {
+                Text("Delete the channel at \(channel.frequencyOffsetDisplay) and all its messages?")
+            }
+        }
+        .confirmationDialog(
+            "Clear All Channels?",
+            isPresented: $showClearAllConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Clear All", role: .destructive) {
+                viewModel.clearAllChannels()
+                selectedChannel = nil
+            }
+        } message: {
+            Text("Remove all channels and messages for \(mode.displayName)?")
         }
     }
 }

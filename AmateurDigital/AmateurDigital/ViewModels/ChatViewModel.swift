@@ -11,6 +11,14 @@ import UIKit
 import HamTextClassifier
 import CallsignExtractor
 
+#if canImport(AmateurDigitalCore)
+import AmateurDigitalCore
+#endif
+
+#if canImport(ModeClassifierModel)
+import ModeClassifierModel
+#endif
+
 @MainActor
 class ChatViewModel: ObservableObject {
     // MARK: - Published Properties
@@ -42,6 +50,17 @@ class ChatViewModel: ObservableObject {
     @Published var isListening: Bool = false
     @Published var audioError: String?
     @Published var frequencyWarning: String?
+    @Published var draftMessages: [UUID: String] = [:]
+    @Published var inputLevel: Float = 0
+    @Published private(set) var lastReadDates: [UUID: Date] = [:]
+
+    // MARK: - Mode Detection
+    @Published var modeDetectionResult: ModeDetectionResult?
+    @Published var isModeDetectionActive: Bool = false
+    private var modeDetector: ModeDetector?
+    private var modeDetectionTimer: Timer?
+    private let modeDetectionBuffer = AudioSampleBuffer()
+    private let mlClassifier: ModeClassifierML? = try? ModeClassifierML()
 
     // MARK: - Services
     private let audioService: AudioService
@@ -49,6 +68,8 @@ class ChatViewModel: ObservableObject {
     private let textClassifier: HamTextClassifier?
     private let callsignExtractor: CallsignExtractor?
     private var settingsCancellables = Set<AnyCancellable>()
+    private var levelTimer: Timer?
+    private var transmissionTimedOut = false
 
     // MARK: - Constants
     private let defaultComposeFrequency = 1500
@@ -101,9 +122,9 @@ class ChatViewModel: ObservableObject {
         // Set up modem delegate
         modemService.delegate = self
 
-        // Wire up audio input to modem
+        // Wire up audio input to modem DSP queue (NOT main thread)
         audioService.onAudioInput = { [weak self] samples in
-            self?.modemService.processRxSamples(samples)
+            self?.modemService.feedSamples(samples)
         }
 
         // Watch for RTTY settings changes and reconfigure modem
@@ -142,6 +163,7 @@ class ChatViewModel: ObservableObject {
     }
 
     deinit {
+        levelTimer?.invalidate()
         // Ensure idle timer is re-enabled when view model is deallocated
         // Must dispatch to main thread since deinit may run on any thread
         DispatchQueue.main.async {
@@ -159,6 +181,7 @@ class ChatViewModel: ObservableObject {
             // Prevent device from sleeping while listening
             if isListening {
                 UIApplication.shared.isIdleTimerDisabled = true
+                startLevelTimer()
                 print("[ChatViewModel] Audio service started, listening: \(isListening), idle timer disabled")
             }
         } catch {
@@ -172,10 +195,164 @@ class ChatViewModel: ObservableObject {
     func stopListening() {
         audioService.stop()
         isListening = false
+        levelTimer?.invalidate()
+        levelTimer = nil
+        inputLevel = 0
 
         // Re-enable idle timer when not listening
         UIApplication.shared.isIdleTimerDisabled = false
         print("[ChatViewModel] Audio service stopped, idle timer enabled")
+    }
+
+    /// Periodically read input level from audio service for UI display
+    private func startLevelTimer() {
+        levelTimer?.invalidate()
+        levelTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.inputLevel = self?.audioService.inputLevel ?? 0
+            }
+        }
+    }
+
+    // MARK: - Mode Detection
+
+    /// Start mode detection: begins listening for audio and periodically classifying the signal
+    func startModeDetection() async {
+        isModeDetectionActive = true
+        modeDetector = ModeDetector(sampleRate: 48000)
+        modeDetectionBuffer.clear()
+        modeDetectionResult = nil
+
+        // Ensure audio is running
+        if !isListening {
+            do {
+                try await audioService.start()
+                isListening = audioService.isListening
+                audioError = nil
+                if isListening {
+                    UIApplication.shared.isIdleTimerDisabled = true
+                }
+            } catch {
+                audioError = error.localizedDescription
+                isModeDetectionActive = false
+                return
+            }
+        }
+
+        // Temporarily add our buffer collector to the audio callback
+        let modemSvc = modemService
+        let buffer = modeDetectionBuffer
+        audioService.onAudioInput = { samples in
+            // Still feed the modem DSP queue
+            modemSvc.feedSamples(samples)
+            // Also buffer for mode detection
+            buffer.append(samples)
+        }
+
+        // Run detection every 1 second
+        modeDetectionTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.runModeDetection()
+            }
+        }
+    }
+
+    /// Stop mode detection and restore normal audio callback
+    func stopModeDetection() {
+        isModeDetectionActive = false
+        modeDetectionTimer?.invalidate()
+        modeDetectionTimer = nil
+        modeDetector = nil
+
+        // Restore the standard audio callback
+        audioService.onAudioInput = { [weak self] samples in
+            self?.modemService.feedSamples(samples)
+        }
+
+        modeDetectionBuffer.clear()
+    }
+
+    /// Run mode detection on the accumulated buffer
+    private func runModeDetection() {
+        guard let detector = modeDetector else { return }
+
+        let samples = modeDetectionBuffer.snapshot()
+
+        // Need at least 0.5 seconds
+        guard samples.count >= 24000 else { return }
+
+        let ml = mlClassifier
+
+        // Run detection on background thread to avoid blocking UI
+        Task.detached { [weak self] in
+            var result = detector.detect(samples: samples)
+
+            // If ML classifier is available, use it to re-rank based on trained GBM
+            if let ml = ml {
+                let features = result.features
+                let featureDict: [String: Double] = [
+                    "bandwidth": features.occupiedBandwidth,
+                    "flatness": Double(features.spectralFlatness),
+                    "num_peaks": Double(features.peaks.count),
+                    "top_peak_power": Double(features.peaks.first?.powerAboveNoise ?? 0),
+                    "top_peak_bw": features.peaks.first?.bandwidth3dB ?? 0,
+                    "fsk_pairs": Double(features.fskPairs.count),
+                    "fsk_valley_pairs": Double(features.fskPairs.filter { $0.hasValley }.count),
+                    "envelope_cv": Double(features.envelopeStats.coefficientOfVariation),
+                    "duty_cycle": Double(features.envelopeStats.dutyCycle),
+                    "transition_rate": Double(features.envelopeStats.transitionRate),
+                    "has_ook": features.envelopeStats.hasOnOffKeying ? 1.0 : 0.0,
+                    "baud_rate": features.estimatedBaudRate,
+                    "baud_confidence": Double(features.baudRateConfidence),
+                ]
+
+                let mlResult = ml.classify(features: featureDict)
+
+                // Re-rank: build new ModeScore array from ML probabilities
+                if !mlResult.probabilities.isEmpty {
+                    var newRankings: [ModeScore] = []
+                    for (mode, prob) in mlResult.probabilities {
+                        // Find the matching DigitalMode from the existing rankings
+                        if let existing = result.rankings.first(where: { $0.mode.rawValue.lowercased() == mode }) {
+                            let mlEvidence = Evidence(
+                                label: "ML classifier",
+                                impact: Float(prob),
+                                detail: "GBM model trained on 5800 signals: \(Int(prob * 100))% confidence"
+                            )
+                            var evidence = existing.evidence
+                            evidence.insert(mlEvidence, at: 0)
+                            // Blend: 70% ML, 30% hand-tuned
+                            let blended = Float(prob) * 0.7 + existing.confidence * 0.3
+                            newRankings.append(ModeScore(
+                                mode: existing.mode,
+                                confidence: blended,
+                                explanation: "ML: \(mode) \(Int(prob * 100))%. \(existing.explanation)",
+                                evidence: evidence
+                            ))
+                        }
+                    }
+                    // Add any modes not in ML output
+                    for existing in result.rankings {
+                        if !newRankings.contains(where: { $0.mode == existing.mode }) {
+                            newRankings.append(existing)
+                        }
+                    }
+                    newRankings.sort { $0.confidence > $1.confidence }
+
+                    result = ModeDetectionResult(
+                        rankings: newRankings,
+                        noiseScore: result.noiseScore,
+                        features: result.features,
+                        audioDuration: result.audioDuration,
+                        analysisTime: result.analysisTime
+                    )
+                }
+            }
+
+            await MainActor.run {
+                self?.modeDetectionResult = result
+            }
+        }
     }
 
     // MARK: - Transmission State
@@ -290,10 +467,16 @@ class ChatViewModel: ObservableObject {
         lastDecodeTime[frequency] = nil
         lastReceivedContentTime[frequency] = nil
         decodingMode[frequency] = nil
+        draftMessages[channel.id] = nil
+        lastReadDates[channel.id] = nil
     }
 
     /// Clear all channels and reset decode state for the current mode
     func clearAllChannels() {
+        for channel in channels {
+            draftMessages[channel.id] = nil
+            lastReadDates[channel.id] = nil
+        }
         channelsByMode[selectedMode] = []
         lastDecodeTimeByMode[selectedMode] = [:]
         lastReceivedContentTimeByMode[selectedMode] = [:]
@@ -302,10 +485,28 @@ class ChatViewModel: ObservableObject {
 
     /// Clear channels for a specific mode
     func clearChannels(for mode: DigitalMode) {
+        // Clean up drafts and read dates for channels in this mode
+        for channel in (channelsByMode[mode] ?? []) {
+            draftMessages[channel.id] = nil
+            lastReadDates[channel.id] = nil
+        }
         channelsByMode[mode] = []
         lastDecodeTimeByMode[mode] = [:]
         lastReceivedContentTimeByMode[mode] = [:]
         decodingModeByMode[mode] = [:]
+    }
+
+    /// Mark a channel as read (clears unread badge)
+    func markChannelAsRead(_ id: UUID) {
+        lastReadDates[id] = Date()
+    }
+
+    /// Count of unread received messages for a channel
+    func unreadCount(for channel: Channel) -> Int {
+        guard let lastRead = lastReadDates[channel.id] else {
+            return channel.messages.filter { $0.direction == .received }.count
+        }
+        return channel.messages.filter { $0.direction == .received && $0.timestamp > lastRead }.count
     }
 
     /// Get or create a compose channel for new messages
@@ -391,17 +592,35 @@ class ChatViewModel: ObservableObject {
             // Mark as transmitting
             channels[channelIndex].messages[messageIndex].transmitState = .transmitting
             isTransmitting = true
+            transmissionTimedOut = false
+
+            // Timeout watchdog: force-stop if transmission hangs
+            let watchdog = Task {
+                try await Task.sleep(nanoseconds: 120_000_000_000) // 120 seconds
+                transmissionTimedOut = true
+                audioService.stopPlayback()
+            }
 
             do {
                 try await performTransmission(text: text, atFrequency: frequency)
+                watchdog.cancel()
                 // Mark as sent (only if not cancelled)
                 if isTransmitting {
                     channels[channelIndex].messages[messageIndex].transmitState = .sent
                 }
             } catch AudioServiceError.playbackCancelled {
-                print("[ChatViewModel] Transmission cancelled")
-                // State already set by stopTransmission
+                watchdog.cancel()
+                if transmissionTimedOut {
+                    // Timeout caused the cancellation
+                    print("[ChatViewModel] Transmission timed out")
+                    channels[channelIndex].messages[messageIndex].transmitState = .failed
+                    channels[channelIndex].messages[messageIndex].errorMessage = String(localized: "Transmission timed out")
+                } else {
+                    print("[ChatViewModel] Transmission cancelled")
+                    // State already set by stopTransmission
+                }
             } catch {
+                watchdog.cancel()
                 let errorDesc = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 print("[ChatViewModel] Transmission failed: \(errorDesc)")
                 channels[channelIndex].messages[messageIndex].transmitState = .failed
@@ -455,73 +674,68 @@ class ChatViewModel: ObservableObject {
         print("[ChatViewModel] Playback complete")
     }
 
-    // MARK: - Text Classification
+    // MARK: - Text Classification & Callsign Extraction
 
-    /// Classify channel content as legitimate ham radio or noise.
-    /// Gated to avoid excessive CoreML inference:
-    /// - Requires ≥5 chars before first run
-    /// - Re-runs only every 3 new characters
-    /// - Stops once classified as legitimate, or after 48 chars still negative
-    private func classifyChannel(at channelIndex: Int, for mode: DigitalMode) {
-        guard let classifier = textClassifier else { return }
-        var modeChannels = channelsByMode[mode] ?? []
+    /// Run CoreML classification and callsign extraction on a background thread.
+    /// Gating logic prevents excessive inference (requires ≥5 chars, re-runs every 3 chars).
+    private func classifyAndExtractAsync(at channelIndex: Int, for mode: DigitalMode) {
+        let modeChannels = channelsByMode[mode] ?? []
         guard channelIndex < modeChannels.count else { return }
 
-        // Already classified as legitimate — done
-        if modeChannels[channelIndex].isLikelyLegitimate == true { return }
-
-        let text = modeChannels[channelIndex].previewText
+        let channel = modeChannels[channelIndex]
+        let text = channel.previewText
         let length = text.count
 
-        // Need at least 5 chars
-        guard length >= 5 else { return }
+        // Check gating conditions before dispatching background work
+        let needsClassification = channel.isLikelyLegitimate != true
+            && length >= 5
+            && !(channel.isLikelyLegitimate == false && length > 48)
+            && length >= channel.classifiedAtLength + 3
+        let needsExtraction = channel.callsign == nil
+            && channel.isLikelyLegitimate == true
+            && length >= 5
+            && length >= channel.extractedAtLength + 3
 
-        // Stop checking after 48 chars if still negative
-        if modeChannels[channelIndex].isLikelyLegitimate == false, length > 48 { return }
+        guard needsClassification || needsExtraction else { return }
 
-        // Only re-run every 3 characters of new content
-        guard length >= modeChannels[channelIndex].classifiedAtLength + 3 else { return }
+        let classifier = textClassifier
+        let extractor = callsignExtractor
 
-        let result = classifier.classify(text)
-        modeChannels[channelIndex].isLikelyLegitimate = result.isLegitimate
-        modeChannels[channelIndex].classificationConfidence = result.confidence
-        modeChannels[channelIndex].classifiedAtLength = length
-        channelsByMode[mode] = modeChannels
-    }
+        Task.detached { [weak self] in
+            var classifyResult: (isLegitimate: Bool, confidence: Double)?
+            var extractResult: String?
 
-    // MARK: - Callsign Extraction
+            if needsClassification, let classifier {
+                let result = classifier.classify(text)
+                classifyResult = (result.isLegitimate, result.confidence)
+            }
 
-    /// Extract callsign from channel's decoded text using ML model.
-    /// Gated to avoid excessive CoreML inference:
-    /// - Only runs after classification marks channel as legitimate
-    /// - Requires ≥5 chars
-    /// - Re-runs only every 3 new characters
-    /// - Stops once a callsign is found
-    private func extractChannelCallsign(at channelIndex: Int, for mode: DigitalMode) {
-        guard let extractor = callsignExtractor else { return }
-        var modeChannels = channelsByMode[mode] ?? []
-        guard channelIndex < modeChannels.count else { return }
+            let isLegitAfterClassify = classifyResult?.isLegitimate ?? (channel.isLikelyLegitimate == true)
+            if (needsExtraction || (classifyResult != nil && isLegitAfterClassify)),
+               channel.callsign == nil, let extractor {
+                extractResult = extractor.extractCallsign(text)
+            }
 
-        // Already have a callsign — done
-        guard modeChannels[channelIndex].callsign == nil else { return }
+            guard classifyResult != nil || extractResult != nil else { return }
 
-        // Only extract after classification says it's legitimate
-        guard modeChannels[channelIndex].isLikelyLegitimate == true else { return }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                var channels = self.channelsByMode[mode] ?? []
+                guard channelIndex < channels.count else { return }
 
-        let text = modeChannels[channelIndex].previewText
-        let length = text.count
-        guard length >= 5 else { return }
-
-        // Only re-run every 3 characters of new content
-        guard length >= modeChannels[channelIndex].extractedAtLength + 3 else { return }
-
-        modeChannels[channelIndex].extractedAtLength = length
-        if let callsign = extractor.extractCallsign(text) {
-            modeChannels[channelIndex].callsign = callsign
-            channelsByMode[mode] = modeChannels
-            print("[ChatViewModel] Extracted callsign \(callsign) on \(modeChannels[channelIndex].frequency) Hz")
-        } else {
-            channelsByMode[mode] = modeChannels
+                if let result = classifyResult {
+                    channels[channelIndex].isLikelyLegitimate = result.isLegitimate
+                    channels[channelIndex].classificationConfidence = result.confidence
+                    channels[channelIndex].classifiedAtLength = length
+                }
+                if let callsign = extractResult {
+                    channels[channelIndex].callsign = callsign
+                    print("[ChatViewModel] Extracted callsign \(callsign) on \(channels[channelIndex].frequency) Hz")
+                } else if needsExtraction {
+                    channels[channelIndex].extractedAtLength = length
+                }
+                self.channelsByMode[mode] = channels
+            }
         }
     }
 
@@ -628,9 +842,17 @@ class ChatViewModel: ObservableObject {
         // Use the mode that was active during decoding
         let messageMode = modeDecodingMode[frequency] ?? mode
 
-        // For CW single-channel mode, label messages with their frequency
+        // For CW single-channel mode, label messages with their frequency offset
         // so the user can see which signal each decode came from.
-        let messageCallsign: String? = (mode == .cw) ? "\(Int(frequency)) Hz" : nil
+        // Shows offset from 700 Hz (standard CW sidetone), e.g. "+50 Hz", "-25 Hz".
+        let messageCallsign: String?
+        if mode == .cw {
+            let offset = Int(frequency) - 700
+            let sign = offset >= 0 ? "+" : ""
+            messageCallsign = "\(sign)\(offset) Hz"
+        } else {
+            messageCallsign = nil
+        }
 
         if canAppend,
            let lastMessageIndex = modeChannels[channelIndex].messages.indices.last {
@@ -683,11 +905,8 @@ class ChatViewModel: ObservableObject {
         modeLastDecodeTime[frequency] = nil
         lastDecodeTimeByMode[mode] = modeLastDecodeTime
 
-        // Classify channel content
-        classifyChannel(at: channelIndex, for: mode)
-
-        // Extract callsign from decoded text
-        extractChannelCallsign(at: channelIndex, for: mode)
+        // Classify channel content and extract callsign (background thread)
+        classifyAndExtractAsync(at: channelIndex, for: mode)
     }
 }
 
@@ -765,11 +984,8 @@ extension ChatViewModel: ModemServiceDelegate {
 
         print("[ChatViewModel] Rattlegram RX on \(Int(frequency)) Hz from \(callSign ?? "unknown"): \"\(text)\" (\(bitFlips) flips)")
 
-        // Classify channel content
-        classifyChannel(at: channelIndex, for: mode)
-
-        // Extract callsign if not already set (Rattlegram header callsign takes priority)
-        extractChannelCallsign(at: channelIndex, for: mode)
+        // Classify channel content and extract callsign (background thread)
+        classifyAndExtractAsync(at: channelIndex, for: mode)
     }
 
     /// Check if current input level is above the noise floor threshold

@@ -438,6 +438,7 @@ struct BenchmarkSuite {
         runFlatFadingTests()
         runITUChannelTests()
         runAuroralFlutterTests()
+        runNVISTests()
         runCombinedImpairmentTests()
         runLongMessageTests()
         runImpulseNoiseTests()
@@ -732,6 +733,63 @@ struct BenchmarkSuite {
                 let faded = channel.process(samples)
                 var rng = SeededRandom(seed: 1304)
                 return addWhiteNoise(to: faded, snrDB: 15, rng: &rng)
+            }
+        )
+        results.append(r4); printResult(r4)
+
+        print()
+    }
+
+    // MARK: - NVIS Tests (80m/60m regional propagation)
+
+    mutating func runNVISTests() {
+        print("--- NVIS Tests (O/X mode splitting, 80m/60m) ---")
+        let text = "CQ CQ CQ DE W1AW K"
+
+        // NVIS quiet: very low Doppler (near-vertical), moderate O/X delay
+        // Typical 80m quiet nighttime: 0.1 Hz Doppler, 0.5 ms O/X delay
+        let r1 = runTest(
+            category: "nvis", name: "quiet_0.5ms",
+            config: .standard, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 0.1, pathDelay: 0.0005, seed: 1400)
+                return channel.process(samples)
+            }
+        )
+        results.append(r1); printResult(r1)
+
+        // NVIS with larger O/X splitting: 1.5 ms delay (geomagnetically active)
+        let r2 = runTest(
+            category: "nvis", name: "active_1.5ms",
+            config: .standard, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 0.2, pathDelay: 0.0015, seed: 1401)
+                return channel.process(samples)
+            }
+        )
+        results.append(r2); printResult(r2)
+
+        // NVIS with noise (realistic 80m nighttime: high atmospheric noise)
+        let r3 = runTest(
+            category: "nvis", name: "noisy_80m",
+            config: .standard, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 0.1, pathDelay: 0.001, seed: 1402)
+                let faded = channel.process(samples)
+                var rng = SeededRandom(seed: 1403)
+                return addWhiteNoise(to: faded, snrDB: 10, rng: &rng)
+            }
+        )
+        results.append(r3); printResult(r3)
+
+        // NVIS deep fade: O/X modes nearly cancel (worst case)
+        // 2.0 ms delay at 2040 Hz center = phase shift near 180° → deep null
+        let r4 = runTest(
+            category: "nvis", name: "deep_fade_2ms",
+            config: .standard, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 0.15, pathDelay: 0.002, seed: 1404)
+                return channel.process(samples)
             }
         )
         results.append(r4); printResult(r4)
@@ -1246,6 +1304,7 @@ struct BenchmarkSuite {
             "combined":         3.0,
             "long_message":     2.0,   // Realistic QSO-length messages
             "auroral_flutter":  2.0,   // Trans-polar path degradation
+            "nvis":             1.5,   // 80m/60m regional O/X mode splitting
             "impulse_noise":    2.5,   // Real-world HF below 14 MHz (non-Gaussian)
             "narrowband_qrm":   2.0,   // Carrier within RTTY passband
             "wrong_sideband":   1.0,   // Operator LSB/USB error

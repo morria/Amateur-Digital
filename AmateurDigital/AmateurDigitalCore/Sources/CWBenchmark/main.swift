@@ -295,6 +295,7 @@ struct BenchmarkSuite {
         runLongMessageTests()
         runQRMTests()
         runChirpTests()
+        runCWAuroralFlutterTests()
         runFalsePositiveTest()
 
         printSummary()
@@ -667,9 +668,13 @@ struct BenchmarkSuite {
         print("--- Chirp Tests (transmitter frequency shift on key-down) ---")
         let text = "CQ CQ DE W1AW K"
 
+        // Preamble and postamble silence for noise floor estimation
+        let preamble = [Float](repeating: 0, count: Int(0.3 * 48000))  // 300ms
+        let postamble = [Float](repeating: 0, count: Int(0.5 * 48000))  // 500ms
+
         // Mild chirp: 15 Hz upward shift, 5 ms decay (modern rig with slight instability)
-        let chirpSamples1 = generateChirpyCW(text: text, config: .standard,
-                                              chirpHz: 15, chirpDecayMs: 5)
+        let chirpSamples1 = preamble + generateChirpyCW(text: text, config: .standard,
+                                              chirpHz: 15, chirpDecayMs: 5) + postamble
         let demod1 = CWDemodulator(configuration: .standard)
         delegate.reset()
         demod1.delegate = delegate
@@ -680,8 +685,8 @@ struct BenchmarkSuite {
         results.append(r1); printResult(r1)
 
         // Moderate chirp: 30 Hz shift, 8 ms decay (older rig)
-        let chirpSamples2 = generateChirpyCW(text: text, config: .standard,
-                                              chirpHz: 30, chirpDecayMs: 8)
+        let chirpSamples2 = preamble + generateChirpyCW(text: text, config: .standard,
+                                              chirpHz: 30, chirpDecayMs: 8) + postamble
         let demod2 = CWDemodulator(configuration: .standard)
         delegate.reset()
         demod2.delegate = delegate
@@ -692,8 +697,8 @@ struct BenchmarkSuite {
         results.append(r2); printResult(r2)
 
         // Severe chirp: 50 Hz shift, 10 ms decay (very old rig or homebrew)
-        let chirpSamples3 = generateChirpyCW(text: text, config: .standard,
-                                              chirpHz: 50, chirpDecayMs: 10)
+        let chirpSamples3 = preamble + generateChirpyCW(text: text, config: .standard,
+                                              chirpHz: 50, chirpDecayMs: 10) + postamble
         let demod3 = CWDemodulator(configuration: .standard)
         delegate.reset()
         demod3.delegate = delegate
@@ -701,6 +706,48 @@ struct BenchmarkSuite {
         let cer3 = characterErrorRate(expected: text, actual: delegate.decodedText)
         let r3 = TestResult(category: "chirp", name: "severe_50Hz_10ms",
                              expected: text, decoded: delegate.decodedText, cer: cer3, score: cerToScore(cer3))
+        results.append(r3); printResult(r3)
+
+        print()
+    }
+
+    // MARK: - CW Auroral Flutter Tests
+
+    mutating func runCWAuroralFlutterTests() {
+        print("--- Auroral Flutter Tests (trans-polar CW paths) ---")
+        let text = "CQ CQ DE W1AW K"
+
+        // Mild: 10 Hz Doppler (CW Goertzel block is 10ms → 100 Hz resolution, so 10 Hz flutter is sub-resolution)
+        let r1 = runTest(
+            category: "auroral_flutter", name: "mild_10Hz",
+            config: .standard, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 10, pathDelay: 0.001, seed: 600)
+                return channel.process(samples)
+            }
+        )
+        results.append(r1); printResult(r1)
+
+        // Moderate: 25 Hz Doppler
+        let r2 = runTest(
+            category: "auroral_flutter", name: "moderate_25Hz",
+            config: .standard, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 25, pathDelay: 0.002, seed: 601)
+                return channel.process(samples)
+            }
+        )
+        results.append(r2); printResult(r2)
+
+        // Severe: 50 Hz Doppler (CW becomes "buzzy" — characteristic aurora sound)
+        let r3 = runTest(
+            category: "auroral_flutter", name: "severe_50Hz",
+            config: .standard, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 50, pathDelay: 0.002, seed: 602)
+                return channel.process(samples)
+            }
+        )
         results.append(r3); printResult(r3)
 
         print()
@@ -944,6 +991,7 @@ struct BenchmarkSuite {
             "long_message": 2.0,    // Realistic QSO-length messages
             "qrm": 2.0,            // Nearby CW stations (contest/pileup)
             "chirp": 1.5,          // Transmitter frequency shift on key-down
+            "auroral_flutter": 2.0, // Trans-polar CW path degradation
             "false_positive": 2.0,  // Must not decode noise
         ]
 

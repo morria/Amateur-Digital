@@ -7,6 +7,7 @@
 
 import Foundation
 @preconcurrency import AVFoundation
+import Accelerate
 
 /// Callback for receiving audio input samples
 typealias AudioInputCallback = ([Float]) -> Void
@@ -40,6 +41,9 @@ class AudioService: ObservableObject, @unchecked Sendable {
 
     /// Callback for audio input samples
     var onAudioInput: AudioInputCallback?
+
+    /// Pre-allocated buffer for stereo→mono conversion (avoids per-callback heap allocation)
+    private var monoBuffer = [Float](repeating: 0, count: 4096)
 
     /// Flag to track when audio engine is being reconfigured
     private var isReconfiguring: Bool = false
@@ -154,38 +158,39 @@ class AudioService: ObservableObject, @unchecked Sendable {
 
         let frameLength = Int(buffer.frameLength)
         let channelCount = Int(buffer.format.channelCount)
+        let n = vDSP_Length(frameLength)
 
-        // If stereo, mix to mono; if mono, use directly
-        var samples = [Float](repeating: 0, count: frameLength)
+        // Resize pre-allocated buffer if needed (rare: only on audio route change)
+        if monoBuffer.count < frameLength {
+            monoBuffer = [Float](repeating: 0, count: frameLength)
+        }
 
+        // Stereo→mono conversion using vDSP (SIMD-accelerated)
         if channelCount == 1 {
-            // Mono - copy directly
-            for i in 0..<frameLength {
-                samples[i] = channelData[0][i]
-            }
+            memcpy(&monoBuffer, channelData[0], frameLength * MemoryLayout<Float>.size)
         } else {
-            // Stereo or more - mix to mono
-            for i in 0..<frameLength {
-                var sum: Float = 0
-                for ch in 0..<channelCount {
-                    sum += channelData[ch][i]
-                }
-                samples[i] = sum / Float(channelCount)
+            vDSP_vadd(channelData[0], 1, channelData[1], 1, &monoBuffer, 1, n)
+            var half: Float = 0.5
+            vDSP_vsmul(monoBuffer, 1, &half, &monoBuffer, 1, n)
+        }
+
+        // RMS level using vDSP (replaces scalar loop)
+        var rmsLevel: Float = 0
+        vDSP_rmsqv(monoBuffer, 1, &rmsLevel, n)
+
+        // Copy for callback (monoBuffer is reused on next audio callback)
+        let samples = Array(monoBuffer.prefix(frameLength))
+
+        // Update input level on main thread (throttled: skip if unchanged)
+        if abs(inputLevel - rmsLevel) > 0.005 {
+            DispatchQueue.main.async { [weak self] in
+                self?.inputLevel = rmsLevel
             }
         }
 
-        // Calculate RMS level for metering
-        var sumOfSquares: Float = 0
-        for sample in samples {
-            sumOfSquares += sample * sample
-        }
-        let rmsLevel = sqrt(sumOfSquares / Float(samples.count))
-
-        // Call the callback on main thread and update input level
-        DispatchQueue.main.async { [weak self] in
-            self?.inputLevel = rmsLevel
-            self?.onAudioInput?(samples)
-        }
+        // Feed audio to DSP pipeline directly (NOT on main thread).
+        // ModemService.feedSamples dispatches to its own DSP queue.
+        onAudioInput?(samples)
     }
 
     /// Stop audio engine

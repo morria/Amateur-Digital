@@ -38,6 +38,22 @@ let package = Package(
             name: "RTTYBenchmark",
             targets: ["RTTYBenchmark"]
         ),
+        .executable(
+            name: "ModeDetectionBenchmark",
+            targets: ["ModeDetectionBenchmark"]
+        ),
+        .executable(
+            name: "ModeDetectionTrainer",
+            targets: ["ModeDetectionTrainer"]
+        ),
+        .executable(
+            name: "GenerateModeTrainingData",
+            targets: ["GenerateModeTrainingData"]
+        ),
+        .executable(
+            name: "ModeDetectionFeatureExtractor",
+            targets: ["ModeDetectionFeatureExtractor"]
+        ),
     ],
     targets: [
         .target(
@@ -74,6 +90,26 @@ let package = Package(
             name: "RTTYBenchmark",
             dependencies: ["AmateurDigitalCore"],
             path: "Sources/RTTYBenchmark"
+        ),
+        .executableTarget(
+            name: "ModeDetectionBenchmark",
+            dependencies: ["AmateurDigitalCore"],
+            path: "Sources/ModeDetectionBenchmark"
+        ),
+        .executableTarget(
+            name: "ModeDetectionTrainer",
+            dependencies: ["AmateurDigitalCore"],
+            path: "Sources/ModeDetectionTrainer"
+        ),
+        .executableTarget(
+            name: "GenerateModeTrainingData",
+            dependencies: ["AmateurDigitalCore"],
+            path: "Sources/GenerateModeTrainingData"
+        ),
+        .executableTarget(
+            name: "ModeDetectionFeatureExtractor",
+            dependencies: ["AmateurDigitalCore"],
+            path: "Sources/ModeDetectionFeatureExtractor"
         ),
         .testTarget(
             name: "AmateurDigitalCoreTests",

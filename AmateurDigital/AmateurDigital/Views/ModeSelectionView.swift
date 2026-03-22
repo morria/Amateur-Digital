@@ -6,12 +6,14 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct ModeSelectionView: View {
     @EnvironmentObject var viewModel: ChatViewModel
     @ObservedObject private var settings = SettingsManager.shared
     @State private var navigationPath = NavigationPath()
     @State private var showingSettings = false
+    @State private var showingModeDetection = false
 
     private let columns = [
         GridItem(.flexible(), spacing: 16),
@@ -59,6 +61,35 @@ struct ModeSelectionView: View {
                     }
                     .padding(.horizontal, 20)
 
+                    // Detect Mode button
+                    Button {
+                        showingModeDetection = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "waveform.badge.magnifyingglass")
+                                .font(.system(size: 20))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Detect Mode")
+                                    .font(.headline)
+                                Text("Listen and identify the signal")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color(.systemBackground))
+                                .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 4)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
+
                     Spacer(minLength: 40)
                 }
             }
@@ -74,6 +105,17 @@ struct ModeSelectionView: View {
             }
             .sheet(isPresented: $showingSettings) {
                 SettingsView(chatViewModel: viewModel, filterMode: nil)
+            }
+            .navigationDestination(for: String.self) { value in
+                if value == "modeDetection" {
+                    ModeDetectionView(navigationPath: $navigationPath)
+                }
+            }
+            .onChange(of: showingModeDetection) { _, show in
+                if show {
+                    navigationPath.append("modeDetection")
+                    showingModeDetection = false
+                }
             }
             .navigationDestination(for: DigitalMode.self) { mode in
                 ChannelListContainer(mode: mode, navigationPath: $navigationPath)
@@ -113,7 +155,10 @@ struct ModeCard: View {
     }
 
     var body: some View {
-        Button(action: onTap) {
+        Button {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            onTap()
+        } label: {
             VStack(alignment: .leading, spacing: 12) {
                 // Icon and badge
                 HStack {
@@ -194,6 +239,7 @@ struct ChannelListContainer: View {
     @EnvironmentObject var viewModel: ChatViewModel
     @ObservedObject private var settings = SettingsManager.shared
     @State private var showingSettings = false
+    @State private var showClearAllConfirmation = false
 
     /// Subtitle showing configured baud rate for modes with adjustable settings
     private var baudRateSubtitle: String {
@@ -241,8 +287,10 @@ struct ChannelListContainer: View {
                 }
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    AudioLevelIndicator(level: viewModel.inputLevel)
+
                     Button {
-                        viewModel.clearAllChannels()
+                        showClearAllConfirmation = true
                     } label: {
                         Image(systemName: "trash")
                     }
@@ -257,6 +305,17 @@ struct ChannelListContainer: View {
             }
             .sheet(isPresented: $showingSettings) {
                 SettingsView(chatViewModel: viewModel, filterMode: mode)
+            }
+            .confirmationDialog(
+                "Clear All Channels?",
+                isPresented: $showClearAllConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Clear All", role: .destructive) {
+                    viewModel.clearAllChannels()
+                }
+            } message: {
+                Text("Remove all channels and messages for \(mode.displayName)?")
             }
             .onAppear {
                 // Set the mode when this view appears

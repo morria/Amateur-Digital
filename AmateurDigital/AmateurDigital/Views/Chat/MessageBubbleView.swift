@@ -66,10 +66,16 @@ struct MessageBubbleView: View {
         }
     }
 
+    /// Whether this is a CW message with a frequency label (stored in callsign field)
+    private var isCWFrequencyLabel: Bool {
+        message.mode == .cw && isReceived && message.callsign?.hasSuffix("Hz") == true
+    }
+
     var body: some View {
         VStack(alignment: .trailing, spacing: 2) {
-            // Callsign label for received messages
-            if isReceived, let callsign = message.callsign, !callsign.isEmpty {
+            // Callsign label for received messages (not shown for CW frequency labels —
+            // CW shows frequency below the bubble instead)
+            if isReceived, let callsign = message.callsign, !callsign.isEmpty, !isCWFrequencyLabel {
                 HStack {
                     Text(callsign)
                         .font(.caption)
@@ -92,22 +98,32 @@ struct MessageBubbleView: View {
                     Spacer(minLength: 60)
                 }
 
-                // Message bubble
-                Text(message.content)
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(bubbleColor)
-                    .foregroundColor(textColor)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                    .contextMenu {
-                        Button {
-                            UIPasteboard.general.string = message.content
-                        } label: {
-                            Label("Copy", systemImage: "doc.on.doc")
+                // Message bubble with optional CW frequency label below
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(message.content)
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(bubbleColor)
+                        .foregroundColor(textColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                        .contextMenu {
+                            Button {
+                                UIPasteboard.general.string = message.content
+                            } label: {
+                                Label("Copy", systemImage: "doc.on.doc")
+                            }
                         }
+
+                    // CW frequency offset — tiny gray text below the bubble
+                    if isCWFrequencyLabel, let freqLabel = message.callsign {
+                        Text(freqLabel)
+                            .font(.caption2)
+                            .foregroundColor(.secondary.opacity(0.7))
+                            .padding(.leading, 14)
                     }
+                }
 
                 if isReceived && !revealedTimestamp {
                     Spacer(minLength: 60)

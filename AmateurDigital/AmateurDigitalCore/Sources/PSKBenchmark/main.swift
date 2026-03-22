@@ -218,6 +218,7 @@ struct BenchmarkSuite {
         runFadingChannelTests()
         runITUChannelTests()
         runLongMessageTests()
+        runAuroralFlutterTests()
         runNoiseOnlyFalsePositiveTest()
 
         printSummary()
@@ -668,6 +669,61 @@ struct BenchmarkSuite {
         print()
     }
 
+    // MARK: - Auroral Flutter Tests
+
+    mutating func runAuroralFlutterTests() {
+        print("--- Auroral Flutter Tests (trans-polar paths) ---")
+        // PSK31 symbol rate is 31.25 Hz — auroral flutter at 10+ Hz Doppler
+        // exceeds half the symbol rate, destroying phase coherence.
+        let text = "CQ CQ DE W1AW K"
+
+        // Mild flutter: 5 Hz Doppler (below half symbol rate — might survive)
+        let r1 = runSingleTest(
+            category: "auroral_flutter", name: "mild_5Hz", mode: "PSK31",
+            config: .psk31, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 5, pathDelay: 0.001, seed: 500)
+                return channel.process(samples)
+            }
+        )
+        results.append(r1); printResult(r1)
+
+        // Moderate flutter: 10 Hz Doppler (at half symbol rate — critical boundary)
+        let r2 = runSingleTest(
+            category: "auroral_flutter", name: "moderate_10Hz", mode: "PSK31",
+            config: .psk31, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 10, pathDelay: 0.001, seed: 501)
+                return channel.process(samples)
+            }
+        )
+        results.append(r2); printResult(r2)
+
+        // Severe flutter: 25 Hz Doppler (exceeds symbol rate — expected failure)
+        let r3 = runSingleTest(
+            category: "auroral_flutter", name: "severe_25Hz", mode: "PSK31",
+            config: .psk31, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 25, pathDelay: 0.002, seed: 502)
+                return channel.process(samples)
+            }
+        )
+        results.append(r3); printResult(r3)
+
+        // BPSK63 with mild flutter (63 Hz symbol rate — more resilient)
+        let r4 = runSingleTest(
+            category: "auroral_flutter", name: "bpsk63_mild_5Hz", mode: "BPSK63",
+            config: .bpsk63, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 5, pathDelay: 0.001, seed: 503)
+                return channel.process(samples)
+            }
+        )
+        results.append(r4); printResult(r4)
+
+        print()
+    }
+
     // MARK: - Noise-Only False Positive Test
 
     mutating func runNoiseOnlyFalsePositiveTest() {
@@ -894,6 +950,7 @@ struct BenchmarkSuite {
             "bpsk63_stress": 1.5,   // BPSK63 under stress
             "fading": 2.0,          // HF fading is critical for real-world
             "itu_channel": 2.5,     // ITU standard HF propagation
+            "auroral_flutter": 2.0, // Trans-polar path — destroys narrowband PSK
             "long_msg": 1.5,        // Sustained decode reliability
             "false_positive": 2.0,  // Must not decode noise as signal
         ]

@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ChannelRowView: View {
     let channel: Channel
+    var unreadCount: Int = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -43,6 +44,16 @@ struct ChannelRowView: View {
                 Text(timeAgoText)
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                if unreadCount > 0 {
+                    Text("\(unreadCount)")
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                        .frame(minWidth: 18, minHeight: 18)
+                        .background(Color.blue)
+                        .clipShape(Circle())
+                }
             }
 
             // Preview text (latest tail of decoded text, up to 2 lines)

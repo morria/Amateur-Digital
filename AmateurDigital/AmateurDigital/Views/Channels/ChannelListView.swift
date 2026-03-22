@@ -10,6 +10,7 @@ import SwiftUI
 struct ChannelListView: View {
     @EnvironmentObject var viewModel: ChatViewModel
     @State private var channelForSettings: Channel?
+    @State private var channelToDelete: Channel?
 
     var body: some View {
         let visibleChannels = viewModel.channels.filter { $0.hasContent }
@@ -67,11 +68,11 @@ struct ChannelListView: View {
                 List {
                     ForEach(visibleChannels.sorted { $0.frequency < $1.frequency }) { channel in
                         NavigationLink(value: channel) {
-                            ChannelRowView(channel: channel)
+                            ChannelRowView(channel: channel, unreadCount: viewModel.unreadCount(for: channel))
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) {
-                                viewModel.deleteChannel(channel)
+                                channelToDelete = channel
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
@@ -91,6 +92,24 @@ struct ChannelListView: View {
         .sheet(item: $channelForSettings) { channel in
             ChannelSettingsSheet(channel: channel, viewModel: viewModel)
                 .id(channel.id) // Force recreation to ensure onAppear fires
+        }
+        .confirmationDialog(
+            "Delete Channel?",
+            isPresented: Binding(
+                get: { channelToDelete != nil },
+                set: { if !$0 { channelToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let channel = channelToDelete {
+                    viewModel.deleteChannel(channel)
+                }
+            }
+        } message: {
+            if let channel = channelToDelete {
+                Text("Delete the channel at \(channel.frequencyOffsetDisplay) and all its messages?")
+            }
         }
     }
 }
