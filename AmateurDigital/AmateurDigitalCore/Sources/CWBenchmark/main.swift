@@ -95,6 +95,21 @@ func applyFading(to signal: [Float], fadeRateHz: Double, fadeDepth: Float, sampl
     }
 }
 
+func addCWInterference(to signal: [Float], offsetHz: Double, relativeLevel: Float, sampleRate: Double) -> [Float] {
+    // Add a continuous CW tone at an offset frequency (simulates nearby station)
+    let signalRMS = sqrt(signal.map { $0 * $0 }.reduce(0, +) / max(1, Float(signal.count)))
+    let interfererAmplitude = signalRMS * relativeLevel
+    let phaseIncrement = 2.0 * .pi * (700.0 + offsetHz) / sampleRate  // 700 Hz = our center
+    var phase = 0.0
+
+    return signal.enumerated().map { _, sample in
+        let interferer = interfererAmplitude * Float(sin(phase))
+        phase += phaseIncrement
+        if phase >= 2.0 * .pi { phase -= 2.0 * .pi }
+        return sample + interferer
+    }
+}
+
 func applyTimingJitter(to text: String, config: CWConfiguration, jitterFraction: Double, rng: inout SeededRandom) -> [Float] {
     // Generate CW with random timing variation per element
     // jitterFraction: 0.0 = perfect timing, 0.3 = ±30% timing variation
@@ -230,6 +245,8 @@ struct BenchmarkSuite {
         runTimingJitterTests()
         runDashDotRatioTests()
         runCombinedImpairmentTests()
+        runLongMessageTests()
+        runQRMTests()
         runFalsePositiveTest()
 
         printSummary()
@@ -273,7 +290,7 @@ struct BenchmarkSuite {
 
     mutating func runNoiseSweepTests() {
         print("--- Noise Sweep (20 WPM) ---")
-        let snrLevels: [Float] = [30, 25, 20, 15, 12, 10, 8, 6, 3, 0, -3]
+        let snrLevels: [Float] = [30, 25, 20, 15, 12, 10, 8, 6, 3, 0, -3, -6, -10]
         let text = "CQ CQ DE W1AW K"
 
         for snr in snrLevels {
@@ -488,6 +505,110 @@ struct BenchmarkSuite {
         )
         results.append(result5)
         printResult(result5)
+
+        print()
+    }
+
+    // MARK: - Long Message Tests
+
+    mutating func runLongMessageTests() {
+        print("--- Long Message Tests (realistic QSO length) ---")
+
+        let longTexts: [(name: String, text: String)] = [
+            ("full_qso",
+             "CQ CQ CQ DE W1AW W1AW K DE K1ABC K1ABC UR RST 599 NAME BOB QTH BOSTON 73 DE K1ABC SK"),
+            ("contest_run",
+             "CQ TEST W1AW TEST K1ABC 599 05 TU W1AW CQ TEST W1AW TEST N1MM 599 12 TU W1AW"),
+        ]
+
+        // Clean — baseline long-message reliability
+        for (name, text) in longTexts {
+            let result = runTest(category: "long_message", name: "clean_\(name)",
+                                 config: .standard, text: text)
+            results.append(result)
+            printResult(result)
+        }
+
+        // 10 dB noise — moderate HF conditions
+        let result1 = runTest(
+            category: "long_message", name: "10dB_full_qso",
+            config: .standard, text: longTexts[0].text,
+            impairment: { samples in
+                var rng = SeededRandom(seed: 900)
+                return addWhiteNoise(to: samples, snrDB: 10, rng: &rng)
+            }
+        )
+        results.append(result1)
+        printResult(result1)
+
+        // ITU moderate + 15 dB noise — realistic propagation
+        let result2 = runTest(
+            category: "long_message", name: "itu_moderate_full_qso",
+            config: .standard, text: longTexts[0].text,
+            impairment: { samples in
+                var channel = WattersonChannel.moderate(seed: 910)
+                let faded = channel.process(samples)
+                var rng = SeededRandom(seed: 911)
+                return addWhiteNoise(to: faded, snrDB: 15, rng: &rng)
+            }
+        )
+        results.append(result2)
+        printResult(result2)
+
+        // Hand-sent (15% jitter) + 15 dB noise — most common real-world scenario
+        let result3 = runTest(
+            category: "long_message", name: "handsent_15dB_full_qso",
+            config: .standard, text: longTexts[0].text,
+            impairment: { samples in
+                var rng = SeededRandom(seed: 920)
+                return addWhiteNoise(to: samples, snrDB: 15, rng: &rng)
+            }
+        )
+        results.append(result3)
+        printResult(result3)
+
+        print()
+    }
+
+    // MARK: - QRM (Interfering CW Signals)
+
+    mutating func runQRMTests() {
+        print("--- QRM Tests (interfering CW signals) ---")
+        let text = "CQ CQ DE W1AW K"
+
+        // Generate interfering CW tone at different offsets
+        for (offsetHz, level, name) in [
+            (200.0, Float(1.0), "+200Hz_equal"),
+            (100.0, Float(1.0), "+100Hz_equal"),
+            (50.0,  Float(1.0), "+50Hz_equal"),
+            (200.0, Float(2.0), "+200Hz_strong"),
+            (100.0, Float(0.5), "+100Hz_weak"),
+        ] as [(Double, Float, String)] {
+            let result = runTest(
+                category: "qrm", name: name,
+                config: .standard, text: text,
+                impairment: { samples in
+                    addCWInterference(to: samples, offsetHz: offsetHz,
+                                       relativeLevel: level, sampleRate: 48000)
+                }
+            )
+            results.append(result)
+            printResult(result)
+        }
+
+        // QRM + noise (realistic contest pileup)
+        let result = runTest(
+            category: "qrm", name: "100Hz_equal_15dB",
+            config: .standard, text: text,
+            impairment: { samples in
+                var s = addCWInterference(to: samples, offsetHz: 100,
+                                           relativeLevel: 1.0, sampleRate: 48000)
+                var rng = SeededRandom(seed: 950)
+                return addWhiteNoise(to: s, snrDB: 15, rng: &rng)
+            }
+        )
+        results.append(result)
+        printResult(result)
 
         print()
     }
@@ -727,6 +848,8 @@ struct BenchmarkSuite {
             "jitter": 2.0,          // Hand-sent CW is the norm
             "dash_dot": 1.5,        // Real ops have variable ratios
             "combined": 2.5,        // Combined impairments = real world
+            "long_message": 2.0,    // Realistic QSO-length messages
+            "qrm": 2.0,            // Nearby CW stations (contest/pileup)
             "false_positive": 2.0,  // Must not decode noise
         ]
 

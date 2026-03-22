@@ -121,6 +121,13 @@ public final class CWDemodulator {
     private var afcCenterAccum: Double = 0
     private var currentToneFrequency: Double
 
+    // MARK: - Interference Cancellation
+    /// Estimated per-block power of the strongest interferer (from AFC scan).
+    /// Used to subtract Goertzel mainlobe leakage from the main tone measurement.
+    private var interfererPowerPerBlock: Double = 0
+    /// Sinc² leakage factor: how much of the interferer leaks into our Goertzel.
+    private var interfererLeakageFactor: Double = 0
+
     // MARK: - Public Properties
 
     public var estimatedWPM: Double {
@@ -232,8 +239,10 @@ public final class CWDemodulator {
     private func processBlock(_ block: [Float], rawBlock: [Float]) {
         // Main Goertzel uses bandpass-filtered signal for better SNR
         var filter = toneFilter
-        let rawPower = Double(filter.processBlock(block))
+        var rawPower = Double(filter.processBlock(block))
         toneFilter = filter
+
+        // (Interference cancellation removed — AFC can't distinguish our signal from interferer)
 
         // AFC uses unfiltered signal to detect off-frequency signals
         for i in 0..<afcFilters.count {
@@ -343,11 +352,13 @@ public final class CWDemodulator {
                 for i in 0..<afcAccumulators.count { afcAccumulators[i] = 0 }
             } else {
                 // Faster tracking for signal level to handle fading (QSB)
-                // Fast attack (signal rising), moderate decay (signal fading)
+                // Fast attack (signal rising), faster decay for multipath resilience.
+                // Multipath can cancel the tone rapidly (0.5ms delay at 700 Hz = 60% drop).
+                // Decay of 0.85/0.15 (7 block = ~70ms) tracks these dips within one dit.
                 if rawPower > signalLevel {
                     signalLevel = signalLevel * 0.7 + rawPower * 0.3
                 } else {
-                    signalLevel = signalLevel * 0.9 + rawPower * 0.1
+                    signalLevel = signalLevel * 0.85 + rawPower * 0.15
                 }
             }
             toneActive = true
@@ -682,6 +693,8 @@ public final class CWDemodulator {
         afcBlockCount = 0
         afcCenterAccum = 0
         for i in 0..<afcAccumulators.count { afcAccumulators[i] = 0 }
+        interfererPowerPerBlock = 0
+        interfererLeakageFactor = 0
 
         let ditSeconds = MorseCodec.ditDuration(forWPM: configuration.wpm)
         let blockDuration = Double(blockSize) / configuration.sampleRate

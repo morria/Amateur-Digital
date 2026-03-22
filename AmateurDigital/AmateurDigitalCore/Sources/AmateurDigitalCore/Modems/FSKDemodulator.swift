@@ -197,6 +197,8 @@ public final class FSKDemodulator {
     private var markEnvelope: Float = 0
     /// Space channel envelope
     private var spaceEnvelope: Float = 0
+
+    // (Per-tone floor tracking removed — caused space-side selective fading regression)
     /// Shared noise floor estimate for ATC (separate from squelch noise floor)
     private var atcNoiseFloor: Float = 0.001
 
@@ -634,46 +636,38 @@ public final class FSKDemodulator {
         }
         atcNoiseFloor = max(0.0001, atcNoiseFloor)
 
-        // Use simple correlation until envelopes are meaningful
-        let envelopeReady = markEnvelope > 0.001 && spaceEnvelope > 0.001
-        guard envelopeReady else {
-            return polarityInverted ? -simpleCorrelation : simpleCorrelation
-        }
-
-        // Optimal ATC decision (W7AY)
-        let nf = atcNoiseFloor
-        let mClipped = max(0, min(m - nf, markEnvelope - nf))
-        let sClipped = max(0, min(s - nf, spaceEnvelope - nf))
-        let envM = max(0, markEnvelope - nf)
-        let envS = max(0, spaceEnvelope - nf)
-
-        let mProduct = mClipped * envM
-        let sProduct = sClipped * envS
-
-        // Scale ATC bias coefficient based on envelope imbalance.
-        // Full W7AY bias (0.5) is too aggressive — it corrupts Baudot shift codes
-        // when the slow-decay envelope tracker creates systematic threshold offset.
-        // Use reduced bias (0.15) for mild imbalance, ramping to 0.5 only for
-        // strong selective fading (>6 dB envelope ratio).
-        let envelopeRatio = max(envM, envS) / max(min(envM, envS), 0.0001)
-        let biasCoeff: Float
-        if envelopeRatio > 2.0 {
-            biasCoeff = 0.5   // Strong fading: full ATC
-        } else if envelopeRatio > 1.41 {
-            // 3-6 dB: linear ramp from 0.15 to 0.5
-            let t = (envelopeRatio - 1.41) / (2.0 - 1.41)
-            biasCoeff = 0.15 + t * 0.35
+        // Use simple normalized correlation for bit decisions.
+        //
+        // The simple correlation (m-s)/(m+s) is inherently immune to selective fading:
+        // at ANY mark attenuation level, during mark bits m>0 and s≈0, so correlation=+1.
+        // During space bits, s>0 and m≈0, so correlation=-1. The sign is always correct.
+        //
+        // The W7AY ATC formula was previously used here but required slowly-converging
+        // envelopes that never adapted fast enough for deep selective fading (-10 to -20 dB),
+        // causing catastrophic Baudot shift code corruption. The simple correlation avoids
+        // this entirely by not depending on envelope tracking for the bit decision.
+        //
+        // Noise rejection is provided by:
+        // 1. IIR bandpass pre-filter (rejects out-of-band noise)
+        // 2. Goertzel frequency selectivity (91 Hz resolution at 45.45 baud)
+        // 3. The normalization itself ((m-s)/(m+s) cancels equal noise on both tones)
+        // 4. Spectral SNR squelch (rejects broadband noise at character emit time)
+        // 5. Stop bit validation (rejects noise-induced false framing)
+        //
+        // The envelope tracking is kept for signal strength reporting and squelch,
+        // but is no longer used for the correlation/bit decision.
+        //
+        // Scale by spectral SNR confidence to suppress noise-induced false correlations.
+        // Real RTTY: spectralSNR >> 2 → confidence ≈ 1.0 → correlation unchanged.
+        // Broadband noise: spectralSNR ≈ 1.0 → confidence ≈ 0.0 → correlation near 0.
+        // This replaces the ATC's envelope-based noise rejection with spectral-based rejection.
+        let snrConfidence: Float
+        if goertzelWindowSize >= 400 {
+            snrConfidence = min(1.0, max(0, (smoothedSpectralSNR - 1.5) / 2.0))
         } else {
-            biasCoeff = 0.15  // Mild/no fading: reduced bias
+            snrConfidence = 1.0  // At high baud rates, spectral SNR not available
         }
-
-        let mBias = biasCoeff * envM * envM
-        let sBias = biasCoeff * envS * envS
-
-        let v = (mProduct - sProduct) - (mBias - sBias)
-        let maxScale = max(mBias + sBias, 0.0001)
-        let correlation = max(-1.0, min(1.0, v / maxScale))
-
+        let correlation = simpleCorrelation * snrConfidence
         return polarityInverted ? -correlation : correlation
     }
 

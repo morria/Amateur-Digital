@@ -60,6 +60,64 @@ class BenchmarkDelegate: FSKDemodulatorDelegate {
 
 // MARK: - Signal Impairments
 
+/// Add impulsive noise (lightning QRN / power line noise).
+/// Real HF below 14 MHz is dominated by non-Gaussian impulse noise.
+/// Decoders optimized for AWGN lose 5-10 dB with impulsive noise.
+/// - `impulseRate`: average impulses per second (lightning ~5/sec, PLN ~120/sec)
+/// - `impulsePeakDB`: peak impulse level in dB above signal RMS
+/// - `impulseDurationMs`: duration of each impulse in milliseconds
+func addImpulseNoise(
+    to signal: [Float], impulseRate: Double, impulsePeakDB: Float,
+    impulseDurationMs: Double, sampleRate: Double = 48000, rng: inout SeededRandom
+) -> [Float] {
+    let signalRMS = sqrt(signal.map { $0 * $0 }.reduce(0, +) / max(1, Float(signal.count)))
+    let impulsePeak = signalRMS * pow(10.0, impulsePeakDB / 20.0)
+    let impulseSamples = max(1, Int(impulseDurationMs * sampleRate / 1000.0))
+    let avgGap = sampleRate / impulseRate
+
+    var result = signal
+    var nextImpulse = Int(rng.nextDouble() * avgGap)
+
+    var i = 0
+    while i < result.count {
+        if i >= nextImpulse {
+            // Generate impulse burst
+            let sign: Float = rng.nextDouble() > 0.5 ? 1.0 : -1.0
+            for j in 0..<min(impulseSamples, result.count - i) {
+                // Exponential decay envelope
+                let envelope = exp(-3.0 * Float(j) / Float(impulseSamples))
+                result[i + j] += sign * impulsePeak * envelope
+            }
+            i += impulseSamples
+            nextImpulse = i + Int(rng.nextDouble() * avgGap * 2)  // Poisson-like
+        } else {
+            i += 1
+        }
+    }
+    return result
+}
+
+/// Add 60 Hz hum (ground loop) with harmonics
+func addHum(to signal: [Float], humLevelDB: Float, sampleRate: Double = 48000) -> [Float] {
+    let signalRMS = sqrt(signal.map { $0 * $0 }.reduce(0, +) / max(1, Float(signal.count)))
+    let humAmplitude = signalRMS * pow(10.0, humLevelDB / 20.0)
+    return signal.enumerated().map { i, sample in
+        let t = Double(i) / sampleRate
+        let hum = Float(sin(2.0 * .pi * 60.0 * t))           // 60 Hz fundamental
+            + 0.5 * Float(sin(2.0 * .pi * 120.0 * t))         // 2nd harmonic
+            + 0.25 * Float(sin(2.0 * .pi * 180.0 * t))        // 3rd harmonic
+            + 0.125 * Float(sin(2.0 * .pi * 240.0 * t))       // 4th harmonic
+        return sample + hum * humAmplitude
+    }
+}
+
+/// Apply audio clipping (simulates overdriven sound card)
+func applyClipping(to signal: [Float], clipFraction: Float) -> [Float] {
+    let peak = signal.map { abs($0) }.max() ?? 1.0
+    let clipLevel = peak * clipFraction
+    return signal.map { max(-clipLevel, min(clipLevel, $0)) }
+}
+
 func addWhiteNoise(to signal: [Float], snrDB: Float, rng: inout SeededRandom) -> [Float] {
     let signalPower = signal.map { $0 * $0 }.reduce(0, +) / max(1, Float(signal.count))
     let signalRMS = sqrt(signalPower)
@@ -139,6 +197,41 @@ func applySelectiveFading(
         }
     }
 
+    return result
+}
+
+/// Apply graduated selective fading: mark attenuation ramps linearly from 0 to maxAttenDB
+/// over the course of the signal. Tests whether the ATC can track worsening conditions.
+func applyGraduatedFading(
+    to signal: [Float], config: RTTYConfiguration,
+    maxMarkAttenDB: Float, sampleRate: Double = 48000
+) -> [Float] {
+    let markCenter = config.markFrequency
+    let spaceCenter = config.spaceFrequency
+    let halfShift = config.shift / 2.0
+
+    var markBP = BandpassFilter(
+        lowCutoff: markCenter - halfShift * 0.8,
+        highCutoff: markCenter + halfShift * 0.8,
+        sampleRate: sampleRate
+    )
+    var spaceBP = BandpassFilter(
+        lowCutoff: spaceCenter - halfShift * 0.8,
+        highCutoff: spaceCenter + halfShift * 0.8,
+        sampleRate: sampleRate
+    )
+
+    var result = signal
+    for i in 0..<result.count {
+        let progress = Float(i) / Float(max(1, result.count - 1))  // 0.0 → 1.0
+        let currentAttenDB = maxMarkAttenDB * progress
+        let markGain = pow(10.0, -currentAttenDB / 20.0)
+
+        let mPart = markBP.process(signal[i])
+        let sPart = spaceBP.process(signal[i])
+        let remainder = signal[i] - mPart - sPart
+        result[i] = mPart * Float(markGain) + sPart + remainder
+    }
     return result
 }
 
@@ -293,6 +386,9 @@ struct BenchmarkSuite {
         runFlatFadingTests()
         runITUChannelTests()
         runCombinedImpairmentTests()
+        runLongMessageTests()
+        runImpulseNoiseTests()
+        runEquipmentImpairmentTests()
         runFalsePositiveTests()
 
         printSummary()
@@ -408,9 +504,11 @@ struct BenchmarkSuite {
 
         for (offset, level, name) in [(200.0, Float(1.0), "+200Hz_equal"),
                                        (200.0, Float(2.0), "+200Hz_strong"),
+                                       (250.0, Float(1.0), "+250Hz_equal"),
                                        (300.0, Float(1.0), "+300Hz_equal"),
                                        (500.0, Float(1.0), "+500Hz_equal"),
-                                       (200.0, Float(0.5), "+200Hz_weak")] as [(Double, Float, String)] {
+                                       (200.0, Float(0.5), "+200Hz_weak"),
+                                       (200.0, Float(0.25), "+200Hz_vweak")] as [(Double, Float, String)] {
             let result = runTest(
                 category: "adj_channel", name: name,
                 config: .standard, text: text,
@@ -609,6 +707,203 @@ struct BenchmarkSuite {
         print()
     }
 
+    // MARK: - Long Message Tests
+
+    mutating func runLongMessageTests() {
+        print("--- Long Message Tests (realistic QSO length) ---")
+
+        // Realistic RTTY QSO exchanges (50-100+ chars)
+        let longTexts: [(name: String, text: String)] = [
+            ("full_qso",
+             "CQ CQ CQ DE W1AW W1AW K DE K1ABC K1ABC UR RST 599 599 NAME BOB QTH BOSTON 73 DE K1ABC SK"),
+            ("contest_exchange",
+             "CQ TEST CQ TEST W1AW W1AW TEST K1ABC 599 05 K W1AW 599 12 73"),
+            ("ragchew",
+             "DE W1AW TNX FER CALL UR RST 579 NAME IS BOB QTH BOSTON MA WX CLR TEMP 72 RIG IS IC7300 ANT DIPOLE 73 GL DE W1AW SK"),
+        ]
+
+        // Clean channel — tests baseline long-message reliability
+        for (name, text) in longTexts {
+            let result = runTest(category: "long_message", name: "clean_\(name)",
+                                 config: .standard, text: text)
+            results.append(result)
+            printResult(result)
+        }
+
+        // 15 dB noise — realistic HF conditions
+        for (name, text) in longTexts {
+            let result = runTest(
+                category: "long_message", name: "15dB_\(name)",
+                config: .standard, text: text,
+                impairment: { samples in
+                    var rng = SeededRandom(seed: 800 + UInt64(name.count))
+                    return addWhiteNoise(to: samples, snrDB: 15, rng: &rng)
+                }
+            )
+            results.append(result)
+            printResult(result)
+        }
+
+        // Selective fading -10 dB mark — tests ATC convergence over longer messages
+        // (ATC envelope takes ~19 chars to converge at current rates, so longer
+        //  messages should decode better in the second half)
+        let result = runTest(
+            category: "long_message", name: "sel_fade_10dB_full_qso",
+            config: .standard, text: longTexts[0].text,
+            impairment: { samples in
+                applySelectiveFading(to: samples, config: .standard,
+                                     markAttenDB: 10, spaceAttenDB: 0)
+            }
+        )
+        results.append(result)
+        printResult(result)
+
+        // ITU moderate channel + 15 dB noise — realistic propagation
+        let result2 = runTest(
+            category: "long_message", name: "itu_moderate_full_qso",
+            config: .standard, text: longTexts[0].text,
+            impairment: { samples in
+                var channel = WattersonChannel.moderate(seed: 850)
+                let faded = channel.process(samples)
+                var rng = SeededRandom(seed: 851)
+                return addWhiteNoise(to: faded, snrDB: 15, rng: &rng)
+            }
+        )
+        results.append(result2)
+        printResult(result2)
+
+        // Graduated fading: mark attenuates linearly from 0 to -15 dB over the message.
+        // More realistic than instant fading — tests whether the ATC can track worsening conditions.
+        let result3 = runTest(
+            category: "long_message", name: "graduated_fade_15dB_full_qso",
+            config: .standard, text: longTexts[0].text,
+            impairment: { samples in
+                applyGraduatedFading(to: samples, config: .standard, maxMarkAttenDB: 15)
+            }
+        )
+        results.append(result3)
+        printResult(result3)
+
+        // Graduated fading + noise — the most realistic selective fading scenario
+        let result4 = runTest(
+            category: "long_message", name: "graduated_fade_10dB_15dBnoise",
+            config: .standard, text: longTexts[0].text,
+            impairment: { samples in
+                var faded = applyGraduatedFading(to: samples, config: .standard, maxMarkAttenDB: 10)
+                var rng = SeededRandom(seed: 860)
+                return addWhiteNoise(to: faded, snrDB: 15, rng: &rng)
+            }
+        )
+        results.append(result4)
+        printResult(result4)
+
+        print()
+    }
+
+    // MARK: - Impulse Noise Tests (Real-World HF)
+
+    mutating func runImpulseNoiseTests() {
+        print("--- Impulse Noise Tests (Lightning QRN, Power Line Noise) ---")
+        let text = "CQ CQ CQ DE W1AW K"
+
+        // Lightning QRN: ~5 impulses/sec, 20 dB peak, 0.5 ms duration
+        let r1 = runTest(
+            category: "impulse_noise", name: "lightning_mild",
+            config: .standard, text: text,
+            impairment: { samples in
+                var rng = SeededRandom(seed: 1100)
+                return addImpulseNoise(to: samples, impulseRate: 5,
+                                        impulsePeakDB: 20, impulseDurationMs: 0.5, rng: &rng)
+            }
+        )
+        results.append(r1); printResult(r1)
+
+        // Lightning + 15 dB AWGN (realistic 40m conditions)
+        let r2 = runTest(
+            category: "impulse_noise", name: "lightning_plus_noise",
+            config: .standard, text: text,
+            impairment: { samples in
+                var rng = SeededRandom(seed: 1101)
+                var s = addImpulseNoise(to: samples, impulseRate: 5,
+                                         impulsePeakDB: 20, impulseDurationMs: 0.5, rng: &rng)
+                var rng2 = SeededRandom(seed: 1102)
+                return addWhiteNoise(to: s, snrDB: 15, rng: &rng2)
+            }
+        )
+        results.append(r2); printResult(r2)
+
+        // Power line noise: 120 Hz rate, 15 dB peak, 0.1 ms pulses
+        let r3 = runTest(
+            category: "impulse_noise", name: "powerline_noise",
+            config: .standard, text: text,
+            impairment: { samples in
+                var rng = SeededRandom(seed: 1103)
+                return addImpulseNoise(to: samples, impulseRate: 120,
+                                        impulsePeakDB: 15, impulseDurationMs: 0.1, rng: &rng)
+            }
+        )
+        results.append(r3); printResult(r3)
+
+        // Severe thunderstorm: 20 impulses/sec, 30 dB peak, 1 ms
+        let r4 = runTest(
+            category: "impulse_noise", name: "severe_qrn",
+            config: .standard, text: text,
+            impairment: { samples in
+                var rng = SeededRandom(seed: 1104)
+                return addImpulseNoise(to: samples, impulseRate: 20,
+                                        impulsePeakDB: 30, impulseDurationMs: 1.0, rng: &rng)
+            }
+        )
+        results.append(r4); printResult(r4)
+
+        print()
+    }
+
+    // MARK: - Equipment Impairment Tests
+
+    mutating func runEquipmentImpairmentTests() {
+        print("--- Equipment Impairment Tests ---")
+        let text = "CQ CQ CQ DE W1AW K"
+
+        // Audio overdrive (10% THD — common with misconfigured sound cards)
+        let r1 = runTest(
+            category: "equipment", name: "overdrive_mild",
+            config: .standard, text: text,
+            impairment: { samples in applyClipping(to: samples, clipFraction: 0.8) }
+        )
+        results.append(r1); printResult(r1)
+
+        // Severe audio overdrive (30% THD)
+        let r2 = runTest(
+            category: "equipment", name: "overdrive_severe",
+            config: .standard, text: text,
+            impairment: { samples in applyClipping(to: samples, clipFraction: 0.5) }
+        )
+        results.append(r2); printResult(r2)
+
+        // 60 Hz ground loop hum at -25 dB
+        let r3 = runTest(
+            category: "equipment", name: "60hz_hum",
+            config: .standard, text: text,
+            impairment: { samples in addHum(to: samples, humLevelDB: -25) }
+        )
+        results.append(r3); printResult(r3)
+
+        // Hum + noise (realistic home station)
+        let r4 = runTest(
+            category: "equipment", name: "hum_plus_noise",
+            config: .standard, text: text,
+            impairment: { samples in
+                let hummed = addHum(to: samples, humLevelDB: -20)
+                var rng = SeededRandom(seed: 1200)
+                return addWhiteNoise(to: hummed, snrDB: 15, rng: &rng)
+            }
+        )
+        results.append(r4); printResult(r4)
+
+        print()
+    }
+
     // MARK: - False Positive
 
     mutating func runFalsePositiveTests() {
@@ -716,6 +1011,9 @@ struct BenchmarkSuite {
             "fading":           2.0,
             "itu_channel":      2.5,   // ITU standard HF propagation
             "combined":         3.0,
+            "long_message":     2.0,   // Realistic QSO-length messages
+            "impulse_noise":    2.5,   // Real-world HF below 14 MHz (non-Gaussian)
+            "equipment":        1.5,   // Sound card issues, ground loops
             "false_positive":   1.5,
         ]
 
@@ -766,7 +1064,7 @@ struct BenchmarkSuite {
         let timestamp = ISO8601DateFormatter().string(from: Date())
 
         let cats = ["clean", "baud_rate", "noise", "selective_fading", "adj_channel",
-                     "freq_drift", "fading", "combined", "false_positive"]
+                     "freq_drift", "fading", "combined", "long_message", "false_positive"]
 
         if !FileManager.default.fileExists(atPath: historyPath) {
             let header = "timestamp,composite_score," + cats.joined(separator: ",") + "\n"

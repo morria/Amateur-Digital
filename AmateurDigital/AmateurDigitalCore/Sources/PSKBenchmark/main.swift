@@ -725,6 +725,56 @@ struct BenchmarkSuite {
         )
         results.append(result2)
         printResult(result2)
+
+        // Test with adaptive squelch (squelchLevel = 0, relies on adaptive mechanism)
+        let demodulator3 = PSKDemodulator(configuration: .psk31)
+        delegate.reset()
+        demodulator3.delegate = delegate
+        // squelchLevel defaults to 0 → uses adaptive squelch
+
+        rng = SeededRandom(seed: 99999)
+        var noise3 = [Float](repeating: 0, count: noiseLength)
+        for i in 0..<noiseLength {
+            noise3[i] = Float(rng.nextGaussian()) * 0.1
+        }
+        demodulator3.process(samples: noise3)
+
+        let decoded3 = delegate.decodedText
+        let fp3 = decoded3.count
+        let score3 = fp3 == 0 ? 100.0 : max(0.0, 100.0 - Double(fp3) * 10.0)
+        let result3 = TestResult(
+            category: "false_positive", name: "noise_only_adaptive_squelch",
+            mode: "PSK31", expected: "", decoded: decoded3,
+            cer: decoded3.isEmpty ? 0 : 1, score: score3
+        )
+        results.append(result3)
+        printResult(result3)
+
+        // Test with 5 seconds of noise (more opportunities for false triggering)
+        let demodulator4 = PSKDemodulator(configuration: .psk31)
+        delegate.reset()
+        demodulator4.delegate = delegate
+        demodulator4.squelchLevel = 0.3
+
+        rng = SeededRandom(seed: 77777)
+        let longNoiseLength = 48000 * 5  // 5 seconds
+        var longNoise = [Float](repeating: 0, count: longNoiseLength)
+        for i in 0..<longNoiseLength {
+            longNoise[i] = Float(rng.nextGaussian()) * 0.1
+        }
+        demodulator4.process(samples: longNoise)
+
+        let decoded4 = delegate.decodedText
+        let fp4 = decoded4.count
+        let score4 = fp4 == 0 ? 100.0 : max(0.0, 100.0 - Double(fp4) * 5.0)
+        let result4 = TestResult(
+            category: "false_positive", name: "5sec_noise_0.3squelch",
+            mode: "PSK31", expected: "", decoded: decoded4,
+            cer: decoded4.isEmpty ? 0 : 1, score: score4
+        )
+        results.append(result4)
+        printResult(result4)
+
         print()
     }
 
