@@ -167,6 +167,10 @@ class SettingsManager: NSObject, ObservableObject, @unchecked Sendable {
         didSet { save(enableRattlegram, forKey: "enableRattlegram") }
     }
 
+    @Published var enableFT8: Bool {
+        didSet { save(enableFT8, forKey: "enableFT8") }
+    }
+
     @Published var enableCW: Bool {
         didSet { save(enableCW, forKey: "enableCW") }
     }
@@ -259,6 +263,7 @@ class SettingsManager: NSObject, ObservableObject, @unchecked Sendable {
         self.enableQPSK31 = Self.initialLoadBool(forKey: "enableQPSK31", default: false)
         self.enableQPSK63 = Self.initialLoadBool(forKey: "enableQPSK63", default: false)
         self.enableRattlegram = Self.initialLoadBool(forKey: "enableRattlegram", default: false)
+        self.enableFT8 = Self.initialLoadBool(forKey: "enableFT8", default: false)
         self.enableCW = Self.initialLoadBool(forKey: "enableCW", default: false)
         self.enableJS8Call = Self.initialLoadBool(forKey: "enableJS8Call", default: false)
 
@@ -350,6 +355,7 @@ class SettingsManager: NSObject, ObservableObject, @unchecked Sendable {
             self.enableQPSK31 = loadBool(forKey: "enableQPSK31", default: false)
             self.enableQPSK63 = loadBool(forKey: "enableQPSK63", default: false)
             self.enableRattlegram = loadBool(forKey: "enableRattlegram", default: false)
+            self.enableFT8 = loadBool(forKey: "enableFT8", default: false)
             self.enableCW = loadBool(forKey: "enableCW", default: false)
             self.enableJS8Call = loadBool(forKey: "enableJS8Call", default: false)
             self.cwWPM = loadDouble(forKey: "cwWPM", default: 20.0)
