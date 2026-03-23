@@ -1,34 +1,36 @@
-name: Tests
+name: Test
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - 'AmateurDigital/AmateurDigitalCore/**'
-      - '.github/workflows/test.yml'
+    branches: [main]
   pull_request:
-    branches:
-      - main
-    paths:
-      - 'AmateurDigital/AmateurDigitalCore/**'
-      - '.github/workflows/test.yml'
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  test:
+  build-and-test:
     runs-on: macos-14
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+      - name: Build AmateurDigitalCore
+        run: cd AmateurDigital/AmateurDigitalCore && swift build
 
-      - name: Build
-        working-directory: AmateurDigital/AmateurDigitalCore
-        run: swift build
+      - name: Run unit tests
+        run: cd AmateurDigital/AmateurDigitalCore && swift test
 
-      - name: Run Tests
-        working-directory: AmateurDigital/AmateurDigitalCore
-        run: swift test
+      - name: Run RTTY benchmark (regression check)
+        run: |
+          cd AmateurDigital/AmateurDigitalCore
+          swift run -c release RTTYBenchmark 2>&1 | tee /tmp/bench.txt
+
+      - name: Check benchmark score
+        run: |
+          python3 -c "
+          import json
+          with open('/tmp/rtty_benchmark_latest.json') as f:
+              score = json.load(f)['composite_score']
+          print(f'RTTY Composite Score: {score:.1f}/100')
+          assert score >= 88.0, f'REGRESSION: Score {score:.1f} below baseline 88.0'
+          print('No regression detected')
+          "

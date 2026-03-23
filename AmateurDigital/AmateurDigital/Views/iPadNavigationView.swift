@@ -40,8 +40,15 @@ struct iPadNavigationView: View {
                 )
             }
         } detail: {
-            // Detail: Messages for selected channel
-            if let channel = selectedChannel {
+            // Detail: Messages for selected channel, or FT8 QSO view
+            if selectedMode == .ft8 {
+                FT8QSOView(viewModel: FT8QSOViewModel(
+                    theirCallsign: "",
+                    theirGrid: "",
+                    myCallsign: SettingsManager.shared.callsign,
+                    myGrid: String(SettingsManager.shared.effectiveGrid.prefix(4))
+                ))
+            } else if let channel = selectedChannel {
                 ChannelDetailView(channel: channel)
             } else if selectedMode != nil {
                 ContentUnavailableView(

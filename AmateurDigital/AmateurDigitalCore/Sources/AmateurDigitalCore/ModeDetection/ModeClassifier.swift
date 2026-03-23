@@ -64,7 +64,7 @@ public struct ModeClassifier {
     /// Score all supported modes against the given spectral features.
     /// Returns scores sorted by confidence descending (most likely first).
     public func classify(features: SpectralFeatures) -> [ModeScore] {
-        let modes: [DigitalMode] = [.rtty, .psk31, .bpsk63, .qpsk31, .qpsk63, .cw, .js8call]
+        let modes: [DigitalMode] = [.rtty, .psk31, .bpsk63, .qpsk31, .qpsk63, .cw, .js8call, .ft8]
 
         // Check if there's any real signal:
         // - Must have peaks > 10 dB above noise (ambient mic noise is 10-11 dB)
@@ -222,6 +222,8 @@ public struct ModeClassifier {
             return scoreCW(features)
         case .js8call:
             return scoreJS8Call(features)
+        case .ft8:
+            return scoreFT8(features)
         case .olivia:
             return scoreOlivia(features)
         }
@@ -363,7 +365,7 @@ public struct ModeClassifier {
             // Wide bandwidth — penalize less only for real-world RTTY signature:
             // many FSK pairs + low CV (constant-envelope) + no valleys (band noise)
             let realWorldRTTY = f.fskPairs.count >= 8
-                && f.envelopeStats.coefficientOfVariation < 0.3
+                && f.envelopeStats.coefficientOfVariation < 0.5
                 && f.fskPairs.filter({ $0.hasValley }).count <= 2
             let penalty: Float = realWorldRTTY ? 0.05 : 0.15
             score -= penalty
@@ -924,16 +926,15 @@ public struct ModeClassifier {
         }
 
         // --- Baud rate match: JS8Call = 6.25 baud ---
-        // Only give credit when the signal also has JS8Call-like spectral characteristics
-        // (few peaks, GFSK-width peak) to avoid false positives from subharmonics in RTTY/noise.
-        // 6.25 baud is a subharmonic of 31.25 and 62.5 — verify the signal doesn't
-        // also have characteristics of PSK (which would indicate the 6.25 is a subharmonic).
+        // Baud rate 6.25 match — ONLY with strict spectral shape gate.
+        // 6.25 Hz is a universal subharmonic that appears in all signals' cyclostationary
+        // spectra, so we can't trust it without additional spectral evidence.
         let hasJS8SpectralShape = peaksAbove10dB <= 5
-            && (f.peaks.first.map { $0.bandwidth3dB > 30 && $0.bandwidth3dB < 65 } ?? false)
+            && (f.peaks.first.map { $0.bandwidth3dB > 20 && $0.bandwidth3dB < 70 } ?? false)
         if f.baudRateConfidence > 0.5 && abs(f.estimatedBaudRate - 6.25) < 1.0 && hasJS8SpectralShape {
             score += 0.25
             evidence.append(Evidence(
-                label: "Baud rate matches JS8Call",
+                label: "Baud rate matches JS8Call/FT8",
                 impact: 0.25,
                 detail: "Estimated \(String(format: "%.1f", f.estimatedBaudRate)) baud + GFSK-like spectrum"
             ))
@@ -948,6 +949,36 @@ public struct ModeClassifier {
         }
 
         return buildScore(mode: .js8call, rawScore: score, evidence: evidence)
+    }
+
+    // MARK: - FT8 Scoring
+    //
+    // FT8 is spectrally identical to JS8Call (same 8-GFSK at 6.25 baud, same 50 Hz BW).
+    // They differ only in Costas sync arrays, CRC, and message structure — which require
+    // demodulation to distinguish. For spectral classification, FT8 scores the same as
+    // JS8Call but with a slight prior boost since FT8 is far more common on the bands.
+
+    private func scoreFT8(_ f: SpectralFeatures) -> ModeScore {
+        // Start with the JS8Call score since they're spectrally identical
+        let js8Score = scoreJS8Call(f)
+
+        var evidence = js8Score.evidence
+        // FT8 is ~100x more common than JS8Call on HF — slight prior boost
+        let ft8Boost: Float = 0.03
+        evidence.append(Evidence(
+            label: "FT8 prior (more common than JS8Call)",
+            impact: ft8Boost,
+            detail: "FT8 is the most common weak-signal mode on HF. Spectrally identical to JS8Call."
+        ))
+
+        let confidence = min(1.0, js8Score.confidence + ft8Boost)
+
+        return ModeScore(
+            mode: .ft8,
+            confidence: confidence,
+            explanation: js8Score.explanation.replacingOccurrences(of: "JS8Call", with: "FT8/JS8Call"),
+            evidence: evidence
+        )
     }
 
     // MARK: - Olivia Scoring

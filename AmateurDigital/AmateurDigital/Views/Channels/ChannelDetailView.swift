@@ -112,6 +112,14 @@ struct ChannelDetailView: View {
                 return "CQ CQ DE \(call) K"
             }
             return "CQ CQ DE \(call) \(grid) K"
+
+        case .ft8:
+            // FT8 uses structured 13-char messages
+            let grid4 = String(grid.prefix(4))
+            if grid4.isEmpty {
+                return "CQ \(call)"
+            }
+            return "CQ \(call) \(grid4)"
         }
     }
 

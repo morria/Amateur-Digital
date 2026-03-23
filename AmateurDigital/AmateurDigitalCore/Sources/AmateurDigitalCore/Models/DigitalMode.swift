@@ -14,6 +14,7 @@ public enum DigitalMode: String, CaseIterable, Identifiable, Codable {
     case olivia = "Olivia"
     case cw = "CW"
     case js8call = "JS8Call"
+    case ft8 = "FT8"
 
     public var id: String { rawValue }
 
@@ -27,6 +28,7 @@ public enum DigitalMode: String, CaseIterable, Identifiable, Codable {
         case .olivia: return "Olivia 8/250"
         case .cw: return "CW (Morse)"
         case .js8call: return "JS8Call"
+        case .ft8: return "FT8"
         }
     }
 
@@ -48,6 +50,8 @@ public enum DigitalMode: String, CaseIterable, Identifiable, Codable {
             return "CW (Morse Code) - On-off keyed tone, 5-60 WPM"
         case .js8call:
             return "JS8Call - Weak-signal 8-FSK with LDPC FEC"
+        case .ft8:
+            return "FT8 - Weak-signal 8-GFSK, 15s periods, -20 dB SNR"
         }
     }
 
@@ -61,6 +65,7 @@ public enum DigitalMode: String, CaseIterable, Identifiable, Codable {
         case .olivia: return 1500.0 // Olivia center frequency
         case .cw: return 700.0      // Standard CW sidetone
         case .js8call: return 1000.0 // Standard JS8Call audio carrier
+        case .ft8: return 1500.0    // FT8 default audio carrier
         }
     }
 
@@ -69,7 +74,7 @@ public enum DigitalMode: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .psk31, .bpsk63, .qpsk31, .qpsk63:
             return true
-        case .rtty, .olivia, .cw, .js8call:
+        case .rtty, .olivia, .cw, .js8call, .ft8:
             return false
         }
     }
@@ -79,6 +84,11 @@ public enum DigitalMode: String, CaseIterable, Identifiable, Codable {
         self == .cw
     }
 
+    /// Whether this is FT8 mode
+    public var isFT8Mode: Bool {
+        self == .ft8
+    }
+
     /// Get PSK configuration for PSK modes, nil for non-PSK modes
     public var pskConfiguration: PSKConfiguration? {
         switch self {
@@ -86,7 +96,7 @@ public enum DigitalMode: String, CaseIterable, Identifiable, Codable {
         case .bpsk63: return .bpsk63
         case .qpsk31: return .qpsk31
         case .qpsk63: return .qpsk63
-        case .rtty, .olivia, .cw, .js8call: return nil
+        case .rtty, .olivia, .cw, .js8call, .ft8: return nil
         }
     }
 

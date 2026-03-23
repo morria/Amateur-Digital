@@ -31,140 +31,140 @@ public final class BayesianCWDecoder {
 
     /// Smoothing alpha for the exponential moving average of tone probability.
     /// Higher = more responsive to rapid changes, lower = more stable.
-    /// Range: 0.1 - 0.9. Default: 0.4
-    public var toneSmoothing: Double = 0.4
+    /// Range: 0.1 - 0.9. Default: 0.521 (Optuna trial 17)
+    public var toneSmoothing: Double = 0.521
 
     /// Prior weight for tone-on probability before signal is detected.
     /// Higher = more likely to detect a tone in ambiguous situations.
-    /// Range: 0.1 - 0.9. Default: 0.3
-    public var tonePriorWeight: Double = 0.3
+    /// Range: 0.1 - 0.9. Default: 0.783 (Optuna trial 17)
+    public var tonePriorWeight: Double = 0.783
 
     /// Tracking rate for signal (tone-on) power estimation.
     /// Higher = faster adaptation to signal level changes (fading).
-    /// Range: 0.05 - 0.5. Default: 0.15
-    public var signalTrackingRate: Double = 0.15
+    /// Range: 0.05 - 0.5. Default: 0.138 (Optuna trial 17)
+    public var signalTrackingRate: Double = 0.138
 
     /// Tracking rate for noise (tone-off) power estimation.
     /// Lower = more stable noise floor, but slower to adapt to changing conditions.
-    /// Range: 0.01 - 0.2. Default: 0.05
-    public var noiseTrackingRate: Double = 0.05
+    /// Range: 0.01 - 0.2. Default: 0.025 (Optuna trial 17)
+    public var noiseTrackingRate: Double = 0.025
 
     /// Minimum SNR (linear ratio) required to declare tone present.
     /// Higher = fewer false detections but may miss weak signals.
-    /// Range: 1.5 - 10.0. Default: 3.0
-    public var toneDetectionSNR: Double = 3.0
+    /// Range: 1.5 - 10.0. Default: 3.947 (Optuna trial 17)
+    public var toneDetectionSNR: Double = 3.947
 
     /// Number of preamble blocks for initial noise estimation.
-    /// Range: 5 - 40. Default: 20
-    public var preambleBlocks: Int = 20
+    /// Range: 5 - 40. Default: 14 (Optuna trial 17)
+    public var preambleBlocks: Int = 14
 
     // -- Element classification (Gaussian model) --
 
     /// Sigma for element duration classification, as a fraction of the dit duration.
     /// Controls timing jitter tolerance. Smaller = stricter timing requirements.
-    /// Range: 0.15 - 0.60. Default: 0.35
-    public var elementSigmaFraction: Double = 0.35
+    /// Range: 0.15 - 0.60. Default: 0.279 (Optuna trial 17)
+    public var elementSigmaFraction: Double = 0.279
 
     /// Dit/dah boundary as a multiple of estimated dit duration.
     /// Elements shorter than this are classified as dit, longer as dah.
-    /// Range: 1.5 - 2.5. Default: 2.0
-    public var ditDahBoundary: Double = 2.0
+    /// Range: 1.5 - 2.5. Default: 1.787 (Optuna trial 17)
+    public var ditDahBoundary: Double = 1.787
 
     /// Minimum element duration as fraction of dit blocks (noise rejection).
     /// Elements shorter than this are discarded as noise spikes.
-    /// Range: 0.15 - 0.5. Default: 0.33
-    public var minElementFraction: Double = 0.33
+    /// Range: 0.15 - 0.5. Default: 0.323 (Optuna trial 17)
+    public var minElementFraction: Double = 0.323
 
     // -- Gap classification --
 
     /// Inter-character gap threshold as multiple of dit duration.
     /// Gaps longer than this flush the current character.
-    /// Range: 1.5 - 3.5. Default: 2.0
-    public var interCharGapMultiple: Double = 2.0
+    /// Range: 1.5 - 3.5. Default: 2.224 (Optuna trial 17)
+    public var interCharGapMultiple: Double = 2.224
 
     /// Word gap threshold as multiple of dit duration.
     /// Gaps longer than this insert a word space.
-    /// Range: 4.0 - 8.0. Default: 5.0
-    public var wordGapMultiple: Double = 5.0
+    /// Range: 4.0 - 8.0. Default: 5.603 (Optuna trial 17)
+    public var wordGapMultiple: Double = 5.603
 
     // -- Beam search character hypotheses --
 
     /// Maximum number of active hypotheses (beam width).
     /// Higher = more thorough search but slower.
-    /// Range: 4 - 32. Default: 8
-    public var beamWidth: Int = 8
+    /// Range: 4 - 32. Default: 18 (Optuna trial 17)
+    public var beamWidth: Int = 18
 
     /// Pruning threshold: hypotheses with probability below
     /// bestProb * pruneThreshold are discarded.
-    /// Range: 0.001 - 0.1. Default: 0.01
-    public var pruneThreshold: Double = 0.01
+    /// Range: 0.001 - 0.1. Default: 0.00191 (Optuna trial 17)
+    public var pruneThreshold: Double = 0.00191
 
     // -- Speed tracking --
 
     /// Size of the speed tracker window (number of element pairs).
-    /// Range: 4 - 32. Default: 16
-    public var speedTrackerSize: Int = 16
+    /// Range: 4 - 32. Default: 27 (Optuna trial 17)
+    public var speedTrackerSize: Int = 27
 
     /// Speed jump detection ratio. If new estimate differs from current
     /// by more than this factor, reset the tracker for fast adaptation.
-    /// Range: 1.2 - 2.0. Default: 1.5
-    public var speedJumpRatio: Double = 1.5
+    /// Range: 1.2 - 2.0. Default: 1.518 (Optuna trial 17)
+    public var speedJumpRatio: Double = 1.518
 
     // -- AFC --
 
     /// AFC update interval in blocks.
-    /// Range: 10 - 60. Default: 30
-    public var afcUpdateInterval: Int = 30
+    /// Range: 10 - 60. Default: 53 (Optuna trial 17)
+    public var afcUpdateInterval: Int = 53
 
     /// AFC aggressiveness for large offsets (>75 Hz).
-    /// Range: 0.3 - 1.0. Default: 0.8
-    public var afcLargeOffsetGain: Double = 0.8
+    /// Range: 0.3 - 1.0. Default: 0.738 (Optuna trial 17)
+    public var afcLargeOffsetGain: Double = 0.738
 
     /// AFC aggressiveness for small offsets (<=75 Hz).
-    /// Range: 0.2 - 0.8. Default: 0.5
-    public var afcSmallOffsetGain: Double = 0.5
+    /// Range: 0.2 - 0.8. Default: 0.617 (Optuna trial 17)
+    public var afcSmallOffsetGain: Double = 0.617
 
     /// AFC minimum power ratio to trigger correction.
     /// Best AFC bin must exceed center bin by this factor.
-    /// Range: 1.05 - 2.0. Default: 1.2
-    public var afcMinPowerRatio: Double = 1.2
+    /// Range: 1.05 - 2.0. Default: 1.406 (Optuna trial 17)
+    public var afcMinPowerRatio: Double = 1.406
 
     // -- Debounce --
 
     /// Debounce threshold as fraction of dit blocks.
     /// Gaps shorter than this are merged with the preceding tone.
-    /// Range: 0.2 - 0.6. Default: 0.4
-    public var debounceFraction: Double = 0.4
+    /// Range: 0.2 - 0.6. Default: 0.407 (Optuna trial 17)
+    public var debounceFraction: Double = 0.407
 
     // -- Threshold adaptation --
 
     /// Threshold fraction for very clean signals (high SNR).
-    /// Range: 0.1 - 0.4. Default: 0.20
-    public var thresholdFractionClean: Double = 0.20
+    /// Range: 0.1 - 0.4. Default: 0.290 (Optuna trial 17)
+    public var thresholdFractionClean: Double = 0.290
 
     /// Threshold fraction for moderate noise.
-    /// Range: 0.15 - 0.5. Default: 0.30
-    public var thresholdFractionModerate: Double = 0.30
+    /// Range: 0.15 - 0.5. Default: 0.363 (Optuna trial 17)
+    public var thresholdFractionModerate: Double = 0.363
 
     /// Threshold fraction for heavy noise.
-    /// Range: 0.25 - 0.6. Default: 0.40
-    public var thresholdFractionNoisy: Double = 0.40
+    /// Range: 0.25 - 0.6. Default: 0.550 (Optuna trial 17)
+    public var thresholdFractionNoisy: Double = 0.550
 
     /// Signal tracking attack rate (rising signal).
-    /// Range: 0.1 - 0.6. Default: 0.3
-    public var signalAttackRate: Double = 0.3
+    /// Range: 0.1 - 0.6. Default: 0.360 (Optuna trial 17)
+    public var signalAttackRate: Double = 0.360
 
     /// Signal tracking decay rate (falling signal).
-    /// Range: 0.05 - 0.3. Default: 0.15
-    public var signalDecayRate: Double = 0.15
+    /// Range: 0.05 - 0.3. Default: 0.201 (Optuna trial 17)
+    public var signalDecayRate: Double = 0.201
 
     /// Recent signal fast decay rate during tone-on.
-    /// Range: 0.1 - 0.5. Default: 0.2
-    public var recentSignalDecay: Double = 0.2
+    /// Range: 0.1 - 0.5. Default: 0.309 (Optuna trial 17)
+    public var recentSignalDecay: Double = 0.309
 
     /// Noise floor tracking rate during silence.
-    /// Range: 0.01 - 0.15. Default: 0.05
-    public var noiseFloorTrackingRate: Double = 0.05
+    /// Range: 0.01 - 0.15. Default: 0.124 (Optuna trial 17)
+    public var noiseFloorTrackingRate: Double = 0.124
 
     // MARK: - Internal State
 

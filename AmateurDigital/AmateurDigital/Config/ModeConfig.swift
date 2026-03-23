@@ -25,6 +25,7 @@ enum ModeConfig {
         .rattlegram,
         .cw,
         .js8call,
+        .ft8,
     ]
 
     /// Check if a specific mode is enabled
@@ -40,6 +41,7 @@ enum ModeConfig {
         case .rattlegram: return settings.enableRattlegram
         case .cw: return settings.enableCW
         case .js8call: return settings.enableJS8Call
+        case .ft8: return settings.enableFT8
         default: return false
         }
     }

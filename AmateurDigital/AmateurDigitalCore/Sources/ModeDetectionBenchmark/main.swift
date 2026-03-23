@@ -481,24 +481,26 @@ class BenchmarkRunner {
         print("JS8Call")
         print(String(repeating: "\u{2500}", count: 70))
 
+        // JS8Call and FT8 are spectrally identical — accept either
         runTest(name: "JS8Call clean (1000 Hz)",
                 category: "js8-baseline", expectedMode: .js8call,
-                samples: generateJS8Call(), weight: 2.0)
+                samples: generateJS8Call(), weight: 2.0,
+                acceptAlternate: [.ft8])
 
         runTest(name: "JS8Call clean (1500 Hz)",
                 category: "js8-baseline", expectedMode: .js8call,
-                samples: generateJS8Call(frequency: 1500))
+                samples: generateJS8Call(frequency: 1500),
+                acceptAlternate: [.ft8])
 
         // JS8Call in noise: at low SNR with 3-second clips, the GFSK envelope
-        // features degrade. Accept PSK-family modes as alternates since JS8Call's
-        // ~50 Hz GFSK bandwidth overlaps spectrally with BPSK63.
+        // features degrade. Accept PSK-family modes and FT8 as alternates.
         for snr: Float in [20, 10, 5] {
             let clean = generateJS8Call()
             let noisy = addWhiteNoise(to: clean, snrDB: snr, rng: &rng)
             runTest(name: "JS8Call + noise (\(Int(snr)) dB SNR)",
                     category: "js8-noise", expectedMode: .js8call,
                     samples: noisy,
-                    acceptAlternate: [.psk31, .bpsk63, .qpsk31, .qpsk63])
+                    acceptAlternate: [.psk31, .bpsk63, .qpsk31, .qpsk63, .ft8])
         }
 
         print()

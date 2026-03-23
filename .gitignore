@@ -52,3 +52,5 @@ research/js8call/
 *.trace
 *.trace
 .claude/worktrees/
+scripts/*.db
+.venv/

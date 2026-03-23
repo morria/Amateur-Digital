@@ -49,6 +49,11 @@ struct PhoneNavigationView: View {
                                     Task { await viewModel.startAudioService() }
                                     let channel = viewModel.getOrCreateComposeChannel()
                                     navigationPath.append(channel)
+                                } else if mode == .ft8 {
+                                    // FT8: dedicated QSO view with auto-sequencing
+                                    viewModel.selectedMode = .ft8
+                                    Task { await viewModel.startAudioService() }
+                                    navigationPath.append("ft8qso")
                                 } else {
                                     navigationPath.append(mode)
                                 }
@@ -105,6 +110,13 @@ struct PhoneNavigationView: View {
             .navigationDestination(for: String.self) { value in
                 if value == "modeDetection" {
                     ModeDetectionView(navigationPath: $navigationPath)
+                } else if value == "ft8qso" {
+                    FT8QSOView(viewModel: FT8QSOViewModel(
+                        theirCallsign: "",
+                        theirGrid: "",
+                        myCallsign: SettingsManager.shared.callsign,
+                        myGrid: String(SettingsManager.shared.effectiveGrid.prefix(4))
+                    ))
                 }
             }
             .navigationDestination(for: DigitalMode.self) { mode in

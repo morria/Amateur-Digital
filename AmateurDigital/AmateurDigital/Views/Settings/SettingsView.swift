@@ -224,6 +224,9 @@ struct SettingsView: View {
                         Toggle(isOn: $settings.enableJS8Call) {
                             Label("JS8Call", systemImage: "antenna.radiowaves.left.and.right")
                         }
+                        Toggle(isOn: $settings.enableFT8) {
+                            Label("FT8", systemImage: "waveform.badge.plus")
+                        }
                     } header: {
                         HStack {
                             Text("Experimental Modes")
@@ -1060,6 +1063,8 @@ enum FrequencyReference {
             return bands  // Rattlegram works on any band
         case .js8call:
             return bands.filter { $0.js8callFreq != nil }
+        case .ft8:
+            return bands  // FT8 works on many bands
         }
     }
 }
@@ -1267,6 +1272,8 @@ struct BandFrequencyRow: View {
             return band.rttyFreq  // CW typically near RTTY frequencies
         case .js8call:
             return band.js8callFreq
+        case .ft8:
+            return band.pskFreq  // FT8 typically near PSK/Data frequencies
         }
     }
 
@@ -1326,6 +1333,8 @@ struct CompactFrequencyReference: View {
             return band.rttyFreq  // CW typically near RTTY frequencies
         case .js8call:
             return band.js8callFreq
+        case .ft8:
+            return band.pskFreq  // FT8 near data frequencies
         }
     }
 }

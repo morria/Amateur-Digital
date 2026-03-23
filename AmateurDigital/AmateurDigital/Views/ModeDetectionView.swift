@@ -302,6 +302,7 @@ struct ModeRankRow: View {
         case "QPSK63": return .indigo
         case "CW": return .yellow
         case "JS8Call": return .mint
+        case "FT8": return .red
         case "Olivia": return .green
         default: return .gray
         }

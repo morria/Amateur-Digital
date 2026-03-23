@@ -612,28 +612,22 @@ func generateTrainingSet(rng: inout SeededRandom) -> [(mode: String, condition: 
         set.append((mode, "real-\(basename)", wavSamples))
     }
 
-    // --- SDR corpus samples (real 48 kHz recordings from WebSDR) ---
-    // Auto-discover all WAV files and map mode from filename pattern.
-    // Note: labels indicate what frequency band was tuned, not verified content.
-    // CW and JS8Call labels are often wrong (no signal present). Accept PSK-family
-    // alternates since PSK31/BPSK63 are spectrally identical in real conditions.
-    let corpusDir = "/Users/asm/d/sdr-sampler/corpus/raw"
-    if let corpusFiles = try? FileManager.default.contentsOfDirectory(atPath: corpusDir) {
-        let modeMap: [String: String] = [
-            "cw": "CW", "rtty": "RTTY", "psk31": "PSK31", "js8call": "JS8Call",
-            "ft8": "JS8Call", // FT8 uses same 8-GFSK as JS8Call — accept either
-            "noise": "noise",
-        ]
+    // --- Verified SDR corpus (human-reviewed, signal confirmed) ---
+    // Uses verified/ subdirectories: rtty/, psk31/, ft8/, noise/, unknown/
+    // Each subdirectory name IS the verified label.
+    let corpusBaseDir = "/Users/asm/d/sdr-sampler/corpus/verified"
+    // unknown/ contains CW-labeled files that don't have CW — exclude.
+    let verifiedModeMap: [String: String] = [
+        "rtty": "RTTY", "psk31": "PSK31", "ft8": "FT8",
+        "noise": "noise", "cw": "CW", "js8call": "JS8Call",
+    ]
 
-        for file in corpusFiles.sorted() where file.hasSuffix(".wav") {
-            let basename = file.replacingOccurrences(of: "session_", with: "")
-            // Extract mode from filename: session_<mode>_<band>_...
-            let parts = basename.components(separatedBy: "_")
-            guard parts.count >= 2 else { continue }
-            let modeKey = parts[0]
-            guard let expectedMode = modeMap[modeKey] else { continue }
+    for (dirName, expectedMode) in verifiedModeMap {
+        let modeDir = "\(corpusBaseDir)/\(dirName)"
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: modeDir) else { continue }
+        for file in files.sorted() where file.hasSuffix(".wav") {
 
-            let path = "\(corpusDir)/\(file)"
+            let path = "\(modeDir)/\(file)"
             guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
                   data.count > 44 else { continue }
 
@@ -660,8 +654,7 @@ func generateTrainingSet(rng: inout SeededRandom) -> [(mode: String, condition: 
                 wavSamples[i] = Float(v) / 32768.0
             }
 
-            let band = parts.count >= 2 ? parts[1] : ""
-            let label = "sdr-\(modeKey)_\(band)"
+            let label = "sdr-\(dirName)/\(file.replacingOccurrences(of: ".wav", with: ""))"
             set.append((expectedMode, label, wavSamples))
         }
     }
@@ -766,6 +759,9 @@ for (mode, condition, audio) in trainingSet {
     } else if pskFamily.contains(mode) {
         // PSK family: accept any PSK mode as correct
         correct = pskFamily.contains(detected)
+    } else if mode == "FT8" || mode == "JS8Call" {
+        // FT8 and JS8Call are spectrally identical — accept either
+        correct = detected == "FT8" || detected == "JS8Call"
     } else {
         correct = detected == mode
     }
@@ -787,7 +783,7 @@ for (mode, condition, audio) in trainingSet {
 print("Per-Mode Feature Statistics")
 print(String(repeating: "-", count: 70))
 
-let modeOrder = ["RTTY", "PSK31", "BPSK63", "QPSK31", "QPSK63", "CW", "JS8Call", "noise"]
+let modeOrder = ["RTTY", "PSK31", "BPSK63", "QPSK31", "QPSK63", "CW", "JS8Call", "FT8", "noise"]
 for mode in modeOrder {
     guard let stats = statsByMode[mode] else { continue }
     print("\n  \(mode) (\(stats.count) samples):")

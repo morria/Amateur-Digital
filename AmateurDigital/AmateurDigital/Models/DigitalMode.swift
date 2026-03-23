@@ -16,6 +16,7 @@ enum DigitalMode: String, CaseIterable, Identifiable {
     case rattlegram = "Rattlegram"
     case cw = "CW"
     case js8call = "JS8Call"
+    case ft8 = "FT8"
 
     var id: String { rawValue }
 
@@ -30,6 +31,7 @@ enum DigitalMode: String, CaseIterable, Identifiable {
         case .rattlegram: return "Rattlegram"
         case .cw: return "CW"
         case .js8call: return "JS8Call"
+        case .ft8: return "FT8"
         }
     }
 
@@ -44,6 +46,7 @@ enum DigitalMode: String, CaseIterable, Identifiable {
         case .rattlegram: return "OFDM 170B/1s"
         case .cw: return "Morse Code"
         case .js8call: return "8-FSK LDPC"
+        case .ft8: return "8-GFSK 15s"
         }
     }
 
@@ -67,6 +70,8 @@ enum DigitalMode: String, CaseIterable, Identifiable {
             return String(localized: "Morse code (CW). Adaptive speed 5-60 WPM with AFC and fading resistance.")
         case .js8call:
             return String(localized: "Weak-signal messaging with LDPC error correction. Decodes at -24 dB SNR.")
+        case .ft8:
+            return String(localized: "FT8 weak-signal mode. 15-second QSOs with structured messages at -20 dB SNR.")
         }
     }
 
@@ -81,6 +86,7 @@ enum DigitalMode: String, CaseIterable, Identifiable {
         case .rattlegram: return 1500.0
         case .cw: return 700.0
         case .js8call: return 1000.0
+        case .ft8: return 1500.0
         }
     }
 
@@ -88,7 +94,7 @@ enum DigitalMode: String, CaseIterable, Identifiable {
         switch self {
         case .psk31, .bpsk63, .qpsk31, .qpsk63:
             return true
-        case .rtty, .olivia, .rattlegram, .cw, .js8call:
+        case .rtty, .olivia, .rattlegram, .cw, .js8call, .ft8:
             return false
         }
     }
@@ -107,13 +113,15 @@ enum DigitalMode: String, CaseIterable, Identifiable {
             return "dot.radiowaves.right"
         case .js8call:
             return "antenna.radiowaves.left.and.right"
+        case .ft8:
+            return "waveform.badge.plus"
         }
     }
 
     @ViewBuilder
     var iconImage: some View {
         if self == .rattlegram {
-            Text("🐍")
+            Text("\u{1F40D}")
         } else {
             Image(systemName: iconName)
         }
@@ -139,6 +147,8 @@ enum DigitalMode: String, CaseIterable, Identifiable {
             return .yellow
         case .js8call:
             return .mint
+        case .ft8:
+            return .red
         }
     }
 }

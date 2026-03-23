@@ -1,0 +1,32 @@
+name: Benchmark
+
+on:
+  pull_request:
+    paths: ['AmateurDigital/AmateurDigitalCore/Sources/**']
+
+jobs:
+  benchmark:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run benchmarks
+        run: |
+          cd AmateurDigital/AmateurDigitalCore
+          swift run -c release RTTYBenchmark 2>&1 | tail -20
+          swift run -c release PSKBenchmark 2>&1 | tail -20
+
+      - name: Post results as PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const rtty = JSON.parse(fs.readFileSync('/tmp/rtty_benchmark_latest.json'));
+            const psk = JSON.parse(fs.readFileSync('/tmp/psk_benchmark_latest.json'));
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## Benchmark Results\n| Decoder | Score |\n|---------|-------|\n| RTTY | **${rtty.composite_score.toFixed(1)}** |\n| PSK | **${psk.composite_score.toFixed(1)}** |`
+            });

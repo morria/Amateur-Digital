@@ -232,6 +232,7 @@ class ModemService: ObservableObject, @unchecked Sendable {
     #if canImport(AmateurDigitalCore)
     private var rttyModem: RTTYModem?
     private var multiChannelDemodulator: MultiChannelRTTYDemodulator?
+    private var dualRTTYDecoder: DualRTTYDecoder?
 
     // MARK: - PSK Modem (supports PSK31, BPSK63, QPSK31, QPSK63)
 
@@ -242,8 +243,12 @@ class ModemService: ObservableObject, @unchecked Sendable {
 
     private var cwModem: CWModem?
     private var bayesianCWDecoder: BayesianCWDecoder?
-    /// Which CW decoder is active on DSP queue: "classic" or "bayesian"
+    private var dualCWDecoder: DualCWDecoder?
+    /// Which CW decoder is active on DSP queue: "classic", "bayesian", or "diversity"
     private var dspCWDecoderType: String = "classic"
+
+    /// Which RTTY decoder type is active on DSP queue: "classic", "selective", or "diversity"
+    private var dspRTTYDecoderType: String = "classic"
 
     // MARK: - JS8Call Modem
 
@@ -279,7 +284,7 @@ class ModemService: ObservableObject, @unchecked Sendable {
             #endif
         case .cw:
             #if canImport(AmateurDigitalCore)
-            return cwModem != nil || bayesianCWDecoder != nil
+            return cwModem != nil || bayesianCWDecoder != nil || dualCWDecoder != nil
             #else
             return false
             #endif
@@ -401,6 +406,7 @@ class ModemService: ObservableObject, @unchecked Sendable {
         let polarityInverted = settings.rttyPolarityInverted
         let freqOffset = settings.rttyFrequencyOffset
         let cwDecoderType = settings.cwDecoderType
+        let rttyDecoderType = settings.rttyDecoderType
 
         // Synchronize modem creation with DSP queue
         dspQueue.sync { [self] in
@@ -408,17 +414,30 @@ class ModemService: ObservableObject, @unchecked Sendable {
             case .rtty:
                 rttyModem = RTTYModem(configuration: rttyConfig)
                 rttyModem?.delegate = self
-                multiChannelDemodulator = MultiChannelRTTYDemodulator.standardSubband()
-                multiChannelDemodulator?.delegate = self
-                multiChannelDemodulator?.setSquelch(rttySquelch)
+                dspRTTYDecoderType = rttyDecoderType
 
-                if polarityInverted || freqOffset != 0 {
-                    for channel in multiChannelDemodulator?.channels ?? [] {
-                        if polarityInverted {
-                            multiChannelDemodulator?.setPolarity(inverted: true, forChannel: channel.id)
-                        }
-                        if freqOffset != 0 {
-                            multiChannelDemodulator?.setFrequencyOffset(Double(freqOffset), forChannel: channel.id)
+                if rttyDecoderType == "diversity" {
+                    multiChannelDemodulator = nil
+                    dualRTTYDecoder = DualRTTYDecoder(configuration: rttyConfig)
+                    dualRTTYDecoder?.delegate = self
+                    dualRTTYDecoder?.squelchLevel = rttySquelch
+                    if polarityInverted {
+                        dualRTTYDecoder?.polarityInverted = true
+                    }
+                } else {
+                    dualRTTYDecoder = nil
+                    multiChannelDemodulator = MultiChannelRTTYDemodulator.standardSubband()
+                    multiChannelDemodulator?.delegate = self
+                    multiChannelDemodulator?.setSquelch(rttySquelch)
+
+                    if polarityInverted || freqOffset != 0 {
+                        for channel in multiChannelDemodulator?.channels ?? [] {
+                            if polarityInverted {
+                                multiChannelDemodulator?.setPolarity(inverted: true, forChannel: channel.id)
+                            }
+                            if freqOffset != 0 {
+                                multiChannelDemodulator?.setFrequencyOffset(Double(freqOffset), forChannel: channel.id)
+                            }
                         }
                     }
                 }
@@ -434,8 +453,23 @@ class ModemService: ObservableObject, @unchecked Sendable {
 
             case .cw:
                 dspCWDecoderType = cwDecoderType
-                if cwDecoderType == "bayesian" {
+                if cwDecoderType == "diversity" {
                     cwModem = nil
+                    bayesianCWDecoder = nil
+                    dualCWDecoder = DualCWDecoder(configuration: cwConfig)
+                    dualCWDecoder?.onCharacterDecoded = { [weak self] char, freq in
+                        self?.pendingChars.append((char, freq, .cw, self?.dualCWDecoder?.signalStrength ?? 0))
+                    }
+                    dualCWDecoder?.onSignalDetected = { [weak self] detected, freq in
+                        DispatchQueue.main.async {
+                            guard let self else { return }
+                            self.isDecoding = detected
+                            self.delegate?.modemService(self, signalDetected: detected, onChannel: freq, mode: .cw)
+                        }
+                    }
+                } else if cwDecoderType == "bayesian" {
+                    cwModem = nil
+                    dualCWDecoder = nil
                     bayesianCWDecoder = BayesianCWDecoder(configuration: cwConfig)
                     bayesianCWDecoder?.onCharacterDecoded = { [weak self] char, freq in
                         self?.pendingChars.append((char, freq, .cw, self?.bayesianCWDecoder?.signalStrength ?? 0))
@@ -449,6 +483,7 @@ class ModemService: ObservableObject, @unchecked Sendable {
                     }
                 } else {
                     bayesianCWDecoder = nil
+                    dualCWDecoder = nil
                     cwModem = CWModem(configuration: cwConfig)
                     cwModem?.delegate = self
                 }
@@ -465,7 +500,11 @@ class ModemService: ObservableObject, @unchecked Sendable {
         // Update @Published on main
         switch mode {
         case .rtty:
-            channelFrequencies = multiChannelDemodulator?.channels.map { $0.frequency } ?? []
+            if dualRTTYDecoder != nil {
+                channelFrequencies = [dualRTTYDecoder!.centerFrequency]
+            } else {
+                channelFrequencies = multiChannelDemodulator?.channels.map { $0.frequency } ?? []
+            }
         case .psk31, .bpsk63, .qpsk31, .qpsk63:
             channelFrequencies = multiChannelPSKDemodulator?.channels.map { $0.frequency } ?? []
         case .cw:
@@ -487,6 +526,7 @@ class ModemService: ObservableObject, @unchecked Sendable {
         let pskSquelch = Float(settings.psk31Squelch)
         dspQueue.async { [self] in
             multiChannelDemodulator?.setSquelch(rttySquelch)
+            dualRTTYDecoder?.squelchLevel = rttySquelch
             multiChannelPSKDemodulator?.setSquelch(pskSquelch)
         }
         #endif
@@ -519,6 +559,7 @@ class ModemService: ObservableObject, @unchecked Sendable {
         let rttySquelch = Float(settings.rttySquelch)
         let cwToneFreq = settings.cwToneFrequency
         let cwDecoderType = settings.cwDecoderType
+        let rttyDecoderType = settings.rttyDecoderType
         #endif
 
         // Synchronize modem creation with DSP queue (blocks briefly to prevent races)
@@ -532,6 +573,7 @@ class ModemService: ObservableObject, @unchecked Sendable {
             cachedPSKSquelch = pskSquelch
             cachedCWToneFreq = cwToneFreq
             dspCWDecoderType = cwDecoderType
+            dspRTTYDecoderType = rttyDecoderType
             #endif
             dspActiveMode = mode
             pendingChars.removeAll(keepingCapacity: true)
@@ -544,7 +586,12 @@ class ModemService: ObservableObject, @unchecked Sendable {
                 if rttyModem == nil {
                     rttyModem = RTTYModem(configuration: rttyConfig)
                 }
-                if multiChannelDemodulator == nil {
+                if rttyDecoderType == "diversity" {
+                    // Diversity: run both classic + selective on primary frequency
+                    dualRTTYDecoder = DualRTTYDecoder(configuration: rttyConfig)
+                    dualRTTYDecoder?.delegate = self
+                    dualRTTYDecoder?.squelchLevel = rttySquelch
+                } else if multiChannelDemodulator == nil {
                     multiChannelDemodulator = MultiChannelRTTYDemodulator.standardSubband()
                     multiChannelDemodulator?.delegate = self
                     multiChannelDemodulator?.setSquelch(rttySquelch)
@@ -558,7 +605,19 @@ class ModemService: ObservableObject, @unchecked Sendable {
                 multiChannelPSKDemodulator?.setSquelch(pskSquelch)
 
             case .cw:
-                if cwDecoderType == "bayesian" {
+                if cwDecoderType == "diversity" {
+                    dualCWDecoder = DualCWDecoder(configuration: cwConfig)
+                    dualCWDecoder?.onCharacterDecoded = { [weak self] char, freq in
+                        self?.pendingChars.append((char, freq, .cw, self?.dualCWDecoder?.signalStrength ?? 0))
+                    }
+                    dualCWDecoder?.onSignalDetected = { [weak self] detected, freq in
+                        DispatchQueue.main.async {
+                            guard let self else { return }
+                            self.isDecoding = detected
+                            self.delegate?.modemService(self, signalDetected: detected, onChannel: freq, mode: .cw)
+                        }
+                    }
+                } else if cwDecoderType == "bayesian" {
                     bayesianCWDecoder = BayesianCWDecoder(configuration: cwConfig)
                     bayesianCWDecoder?.onCharacterDecoded = { [weak self] char, freq in
                         self?.pendingChars.append((char, freq, .cw, self?.bayesianCWDecoder?.signalStrength ?? 0))
@@ -594,7 +653,11 @@ class ModemService: ObservableObject, @unchecked Sendable {
         #if canImport(AmateurDigitalCore)
         switch mode {
         case .rtty:
-            channelFrequencies = multiChannelDemodulator?.channels.map { $0.frequency } ?? []
+            if dualRTTYDecoder != nil {
+                channelFrequencies = [dualRTTYDecoder!.centerFrequency]
+            } else {
+                channelFrequencies = multiChannelDemodulator?.channels.map { $0.frequency } ?? []
+            }
         case .psk31, .bpsk63, .qpsk31, .qpsk63:
             channelFrequencies = multiChannelPSKDemodulator?.channels.map { $0.frequency } ?? []
         case .cw:
@@ -615,10 +678,12 @@ class ModemService: ObservableObject, @unchecked Sendable {
         #if canImport(AmateurDigitalCore)
         rttyModem?.reset()
         multiChannelDemodulator?.reset()
+        dualRTTYDecoder?.reset()
         pskModem?.reset()
         multiChannelPSKDemodulator?.reset()
         cwModem?.reset()
         bayesianCWDecoder?.reset()
+        dualCWDecoder?.reset()
         js8callModem?.reset()
         #endif
 
@@ -651,11 +716,19 @@ class ModemService: ObservableObject, @unchecked Sendable {
         case .rtty:
             if rttyModem == nil, let config = cachedRTTYConfig {
                 rttyModem = RTTYModem(configuration: config)
-                multiChannelDemodulator = MultiChannelRTTYDemodulator.standardSubband()
-                multiChannelDemodulator?.delegate = self
-                multiChannelDemodulator?.setSquelch(cachedRTTYSquelch)
-                let freqs = multiChannelDemodulator?.channels.map { $0.frequency } ?? []
-                DispatchQueue.main.async { [weak self] in self?.channelFrequencies = freqs }
+                if dspRTTYDecoderType == "diversity" {
+                    dualRTTYDecoder = DualRTTYDecoder(configuration: config)
+                    dualRTTYDecoder?.delegate = self
+                    dualRTTYDecoder?.squelchLevel = cachedRTTYSquelch
+                    let freq = config.markFrequency
+                    DispatchQueue.main.async { [weak self] in self?.channelFrequencies = [freq] }
+                } else {
+                    multiChannelDemodulator = MultiChannelRTTYDemodulator.standardSubband()
+                    multiChannelDemodulator?.delegate = self
+                    multiChannelDemodulator?.setSquelch(cachedRTTYSquelch)
+                    let freqs = multiChannelDemodulator?.channels.map { $0.frequency } ?? []
+                    DispatchQueue.main.async { [weak self] in self?.channelFrequencies = freqs }
+                }
             }
         case .psk31, .bpsk63, .qpsk31, .qpsk63:
             if pskModem == nil, let config = cachedPSKConfig {
@@ -668,8 +741,20 @@ class ModemService: ObservableObject, @unchecked Sendable {
                 DispatchQueue.main.async { [weak self] in self?.channelFrequencies = freqs }
             }
         case .cw:
-            if cwModem == nil && bayesianCWDecoder == nil, let config = cachedCWConfig {
-                if dspCWDecoderType == "bayesian" {
+            if cwModem == nil && bayesianCWDecoder == nil && dualCWDecoder == nil, let config = cachedCWConfig {
+                if dspCWDecoderType == "diversity" {
+                    dualCWDecoder = DualCWDecoder(configuration: config)
+                    dualCWDecoder?.onCharacterDecoded = { [weak self] char, freq in
+                        self?.pendingChars.append((char, freq, .cw, self?.dualCWDecoder?.signalStrength ?? 0))
+                    }
+                    dualCWDecoder?.onSignalDetected = { [weak self] detected, freq in
+                        DispatchQueue.main.async {
+                            guard let self else { return }
+                            self.isDecoding = detected
+                            self.delegate?.modemService(self, signalDetected: detected, onChannel: freq, mode: .cw)
+                        }
+                    }
+                } else if dspCWDecoderType == "bayesian" {
                     bayesianCWDecoder = BayesianCWDecoder(configuration: config)
                     bayesianCWDecoder?.onCharacterDecoded = { [weak self] char, freq in
                         self?.pendingChars.append((char, freq, .cw, self?.bayesianCWDecoder?.signalStrength ?? 0))
@@ -738,13 +823,20 @@ class ModemService: ObservableObject, @unchecked Sendable {
 
         switch dspActiveMode {
         case .rtty:
-            if let multiDemod = multiChannelDemodulator {
+            if dspRTTYDecoderType == "diversity", let dual = dualRTTYDecoder {
+                // Diversity mode: run DualRTTYDecoder on primary frequency
+                dual.process(samples: samples)
+                newStrength = dual.signalStrength
+                newDecoding = dual.signalDetected
+            } else if let multiDemod = multiChannelDemodulator {
                 multiDemod.process(samples: samples)
             } else {
                 rttyModem?.process(samples: samples)
             }
-            newStrength = rttyModem?.signalStrength ?? 0
-            newDecoding = rttyModem?.isSignalDetected ?? false
+            if dspRTTYDecoderType != "diversity" {
+                newStrength = rttyModem?.signalStrength ?? 0
+                newDecoding = rttyModem?.isSignalDetected ?? false
+            }
 
         case .psk31, .bpsk63, .qpsk31, .qpsk63:
             if let multiDemod = multiChannelPSKDemodulator {
@@ -756,7 +848,11 @@ class ModemService: ObservableObject, @unchecked Sendable {
             newDecoding = pskModem?.isSignalDetected ?? false
 
         case .cw:
-            if dspCWDecoderType == "bayesian", let bayes = bayesianCWDecoder {
+            if dspCWDecoderType == "diversity", let dual = dualCWDecoder {
+                dual.process(samples: samples)
+                newStrength = dual.signalStrength
+                newDecoding = dual.signalDetected
+            } else if dspCWDecoderType == "bayesian", let bayes = bayesianCWDecoder {
                 bayes.process(samples: samples)
                 newStrength = bayes.signalStrength
                 newDecoding = bayes.signalDetected
@@ -1219,6 +1315,22 @@ extension ModemService: MultiChannelRTTYDemodulatorDelegate {
         let freqs = updatedChannels.map { $0.frequency }
         DispatchQueue.main.async { [weak self] in
             self?.channelFrequencies = freqs
+        }
+    }
+}
+
+// MARK: - DualRTTYDecoderDelegate (Diversity Mode)
+
+extension ModemService: DualRTTYDecoderDelegate {
+    nonisolated func dualDecoder(_ decoder: DualRTTYDecoder, didDecode character: Character, atFrequency frequency: Double) {
+        pendingChars.append((character, frequency, .rtty, decoder.signalStrength))
+    }
+
+    nonisolated func dualDecoder(_ decoder: DualRTTYDecoder, signalDetected detected: Bool, atFrequency frequency: Double) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isDecoding = detected
+            self.delegate?.modemService(self, signalDetected: detected, onChannel: frequency, mode: .rtty)
         }
     }
 }
