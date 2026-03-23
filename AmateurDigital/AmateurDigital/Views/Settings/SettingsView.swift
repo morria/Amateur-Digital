@@ -218,9 +218,7 @@ struct SettingsView: View {
                         Toggle(isOn: $settings.enableRattlegram) {
                             Label("Rattlegram", systemImage: "bolt.horizontal")
                         }
-                        Toggle(isOn: $settings.enableCW) {
-                            Label("CW (Morse)", systemImage: "dot.radiowaves.right")
-                        }
+                        // CW is a core mode (always enabled) — no toggle needed
                         Toggle(isOn: $settings.enableJS8Call) {
                             Label("JS8Call", systemImage: "antenna.radiowaves.left.and.right")
                         }

@@ -38,13 +38,24 @@ class ChatViewModel: ObservableObject {
         channelsByMode[mode] ?? []
     }
 
+    /// The currently selected mode. Audio/modem only starts when the user
+    /// explicitly selects a mode (not on app launch).
     @Published var selectedMode: DigitalMode = .rtty {
         didSet {
-            if oldValue != selectedMode {
+            if oldValue != selectedMode && modeHasBeenSelected {
                 modemService.setMode(selectedMode)
-                // Each mode has its own channel list via channelsByMode
             }
         }
+    }
+
+    /// Whether the user has explicitly selected a mode (prevents auto-listening on launch)
+    private(set) var modeHasBeenSelected = false
+
+    /// Call this when the user explicitly selects a mode (starts audio + modem)
+    func selectMode(_ mode: DigitalMode) {
+        modeHasBeenSelected = true
+        selectedMode = mode
+        modemService.setMode(mode)
     }
     @Published var isTransmitting: Bool = false
     @Published var isListening: Bool = false
@@ -156,10 +167,8 @@ class ChatViewModel: ObservableObject {
         }
         .store(in: &settingsCancellables)
 
-        // Start audio service
-        Task {
-            await startAudioService()
-        }
+        // Audio is NOT started here — it starts when the user selects a mode
+        // and navigates to the channel list or conversation view.
     }
 
     deinit {

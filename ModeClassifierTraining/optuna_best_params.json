@@ -1,0 +1,23 @@
+{
+  "signal_peak_threshold_db": 14.032148278746337,
+  "signal_flatness_max": 0.5231654380624952,
+  "rtty_fsk_no_valley_bonus_3plus": 0.2614585856946446,
+  "rtty_fsk_no_valley_cv_max": 0.5633063543866614,
+  "rtty_bw_penalty_wide": 0.06312114032005504,
+  "rtty_peak_bw_threshold": 22.173423081368348,
+  "psk_narrow_peak_bonus": 0.3468358280832689,
+  "psk_bw_match_bonus": 0.24713009082212015,
+  "psk_cv_high_penalty": 0.1105138178778751,
+  "psk_min_peak_bw": 24.721355474058786,
+  "psk_flatness_penalty": 0.20232392306574354,
+  "cw_narrow_peak_bonus": 0.3712912631977199,
+  "cw_ook_bonus": 0.4184649045835579,
+  "cw_narrow_peak_threshold": 20.57448192903477,
+  "js8_low_transition_bonus": 0.43969174917807385,
+  "js8_peak_bw_min": 24.50294566141342,
+  "js8_peak_bw_max": 70.71549368149518,
+  "js8_gfsk_cv_bonus": 0.17257244251360207,
+  "js8_baud_rate_bonus": 0.3588256238973095,
+  "noise_weak_peak_bonus": 0.11415601299434718,
+  "noise_broadband_bonus": 0.30595555311995626
+}

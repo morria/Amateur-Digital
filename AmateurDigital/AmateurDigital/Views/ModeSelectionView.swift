@@ -47,7 +47,7 @@ struct ModeSelectionView: View {
                                 if mode == .cw {
                                     // CW: single conversation, skip channel list entirely.
                                     // Push Channel directly — back goes to mode selection.
-                                    viewModel.selectedMode = .cw
+                                    viewModel.selectMode(.cw)
                                     Task {
                                         await viewModel.startAudioService()
                                     }
@@ -55,7 +55,7 @@ struct ModeSelectionView: View {
                                     navigationPath.append(channel)
                                 } else if mode == .ft8 {
                                     // FT8: dedicated QSO view with auto-sequencing
-                                    viewModel.selectedMode = .ft8
+                                    viewModel.selectMode(.ft8)
                                     Task {
                                         await viewModel.startAudioService()
                                     }
@@ -332,11 +332,8 @@ struct ChannelListContainer: View {
                 Text("Remove all channels and messages for \(mode.displayName)?")
             }
             .onAppear {
-                // Set the mode when this view appears
-                if viewModel.selectedMode != mode {
-                    viewModel.selectedMode = mode
-                }
-                // Start listening when entering this mode
+                // Set the mode and start listening when this view appears
+                viewModel.selectMode(mode)
                 if !viewModel.isListening {
                     Task {
                         await viewModel.startAudioService()

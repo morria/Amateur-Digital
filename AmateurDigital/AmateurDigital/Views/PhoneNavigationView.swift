@@ -45,13 +45,13 @@ struct PhoneNavigationView: View {
                                 if mode == .cw {
                                     // CW: single conversation — skip channel list,
                                     // go directly to the one shared CW channel.
-                                    viewModel.selectedMode = .cw
+                                    viewModel.selectMode(.cw)
                                     Task { await viewModel.startAudioService() }
                                     let channel = viewModel.getOrCreateComposeChannel()
                                     navigationPath.append(channel)
                                 } else if mode == .ft8 {
                                     // FT8: dedicated QSO view with auto-sequencing
-                                    viewModel.selectedMode = .ft8
+                                    viewModel.selectMode(.ft8)
                                     Task { await viewModel.startAudioService() }
                                     navigationPath.append("ft8qso")
                                 } else {
