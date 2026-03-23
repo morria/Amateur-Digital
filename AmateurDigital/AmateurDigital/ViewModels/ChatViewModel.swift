@@ -349,8 +349,9 @@ class ChatViewModel: ObservableObject {
                 }
             }
 
-            await MainActor.run {
-                self?.modeDetectionResult = result
+            let finalResult = result
+            await MainActor.run { [weak self] in
+                self?.modeDetectionResult = finalResult
             }
         }
     }
@@ -718,17 +719,19 @@ class ChatViewModel: ObservableObject {
 
             guard classifyResult != nil || extractResult != nil else { return }
 
+            let finalClassifyResult = classifyResult
+            let finalExtractResult = extractResult
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 var channels = self.channelsByMode[mode] ?? []
                 guard channelIndex < channels.count else { return }
 
-                if let result = classifyResult {
+                if let result = finalClassifyResult {
                     channels[channelIndex].isLikelyLegitimate = result.isLegitimate
                     channels[channelIndex].classificationConfidence = result.confidence
                     channels[channelIndex].classifiedAtLength = length
                 }
-                if let callsign = extractResult {
+                if let callsign = finalExtractResult {
                     channels[channelIndex].callsign = callsign
                     print("[ChatViewModel] Extracted callsign \(callsign) on \(channels[channelIndex].frequency) Hz")
                 } else if needsExtraction {

@@ -10,7 +10,7 @@ import Foundation
 import AVFoundation
 
 #if canImport(AmateurDigitalCore)
-import AmateurDigitalCore
+@preconcurrency import AmateurDigitalCore
 #endif
 
 #if canImport(RattlegramCore)
@@ -225,7 +225,7 @@ class ModemService: ObservableObject, @unchecked Sendable {
 
     // MARK: - Settings
 
-    private let settings = SettingsManager.shared
+    private let settings = MainActor.assumeIsolated { SettingsManager.shared }
 
     // MARK: - RTTY Modem
 

@@ -14,6 +14,7 @@ enum ModeConfig {
     /// Core modes that are always available
     static let coreModes: Set<DigitalMode> = [
         .rtty,
+        .cw,
     ]
 
     /// Experimental modes that can be toggled by the user
@@ -23,7 +24,6 @@ enum ModeConfig {
         .qpsk31,
         .qpsk63,
         .rattlegram,
-        .cw,
         .js8call,
         .ft8,
     ]
