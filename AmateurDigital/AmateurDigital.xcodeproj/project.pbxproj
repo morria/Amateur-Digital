@@ -45,6 +45,10 @@
 		A10000000000000000000040 /* ModeClassifierModel in Frameworks */ = {isa = PBXBuildFile; productRef = C10000000000000000000005 /* ModeClassifierModel */; };
 		A10000000000000000000038 /* ModeDetectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000038 /* ModeDetectionView.swift */; };
 		A10000000000000000000039 /* AudioSampleBuffer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000039 /* AudioSampleBuffer.swift */; };
+		11B3EC64E84B4DD182C36823 /* FT8MessageRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04BF816D8DBF47D9B29EC26F /* FT8MessageRow.swift */; };
+		13D44EE59F744A5C8B81F4BE /* FT8QSOStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DACF5E22397F417EB0057AD2 /* FT8QSOStatusView.swift */; };
+		FC9CB0C67FE941EBA6F154F6 /* FT8QSOView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3F0A5B30E3D4153B006FFB2 /* FT8QSOView.swift */; };
+		5500619E9E334BC6A0143210 /* FT8WaterfallBannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F482CF24F1964C2C96EC4274 /* FT8WaterfallBannerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -83,6 +87,10 @@
 		A20000000000000000000038 /* ModeDetectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModeDetectionView.swift; sourceTree = "<group>"; };
 		A20000000000000000000039 /* AudioSampleBuffer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSampleBuffer.swift; sourceTree = "<group>"; };
 		A30000000000000000000001 /* AmateurDigital.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AmateurDigital.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		04BF816D8DBF47D9B29EC26F /* FT8MessageRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FT8MessageRow.swift; sourceTree = "<group>"; };
+		DACF5E22397F417EB0057AD2 /* FT8QSOStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FT8QSOStatusView.swift; sourceTree = "<group>"; };
+		D3F0A5B30E3D4153B006FFB2 /* FT8QSOView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FT8QSOView.swift; sourceTree = "<group>"; };
+		F482CF24F1964C2C96EC4274 /* FT8WaterfallBannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FT8WaterfallBannerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -157,6 +165,7 @@
 		A50000000000000000000006 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				56AEA173238242EFB9A4F282 /* FT8 */,
 				A20000000000000000000002 /* ContentView.swift */,
 				A20000000000000000000029 /* AdaptiveContentView.swift */,
 				A20000000000000000000030 /* PhoneNavigationView.swift */,
@@ -262,6 +271,17 @@
 			path = Config;
 			sourceTree = "<group>";
 		};
+		56AEA173238242EFB9A4F282 /* FT8 */ = {
+			isa = PBXGroup;
+			children = (
+				04BF816D8DBF47D9B29EC26F /* FT8MessageRow.swift */,
+				DACF5E22397F417EB0057AD2 /* FT8QSOStatusView.swift */,
+				D3F0A5B30E3D4153B006FFB2 /* FT8QSOView.swift */,
+				F482CF24F1964C2C96EC4274 /* FT8WaterfallBannerView.swift */,
+			);
+			path = FT8;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -356,6 +376,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				11B3EC64E84B4DD182C36823 /* FT8MessageRow.swift in Sources */,
+				13D44EE59F744A5C8B81F4BE /* FT8QSOStatusView.swift in Sources */,
+				FC9CB0C67FE941EBA6F154F6 /* FT8QSOView.swift in Sources */,
+				5500619E9E334BC6A0143210 /* FT8WaterfallBannerView.swift in Sources */,
 				A10000000000000000000001 /* AmateurDigitalApp.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000029 /* AdaptiveContentView.swift in Sources */,

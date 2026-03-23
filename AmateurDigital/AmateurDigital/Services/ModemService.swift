@@ -253,6 +253,10 @@ class ModemService: ObservableObject, @unchecked Sendable {
     // MARK: - JS8Call Modem
 
     private var js8callModem: JS8CallModem?
+
+    // MARK: - FT8 Modem
+
+    private var ft8Modem: FT8Modem?
     #endif
 
     // MARK: - Rattlegram Modem
@@ -291,6 +295,12 @@ class ModemService: ObservableObject, @unchecked Sendable {
         case .js8call:
             #if canImport(AmateurDigitalCore)
             return js8callModem != nil
+            #else
+            return false
+            #endif
+        case .ft8:
+            #if canImport(AmateurDigitalCore)
+            return ft8Modem != nil
             #else
             return false
             #endif
@@ -492,6 +502,10 @@ class ModemService: ObservableObject, @unchecked Sendable {
                 js8callModem = JS8CallModem(configuration: .normal)
                 js8callModem?.delegate = self
 
+            case .ft8:
+                ft8Modem = FT8Modem()
+                ft8Modem?.delegate = self
+
             case .olivia, .rattlegram:
                 break
             }
@@ -511,6 +525,8 @@ class ModemService: ObservableObject, @unchecked Sendable {
             channelFrequencies = [settings.cwToneFrequency]
         case .js8call:
             channelFrequencies = [1000.0]
+        case .ft8:
+            channelFrequencies = [1500.0]
         case .olivia:
             break
         case .rattlegram:
@@ -645,6 +661,10 @@ class ModemService: ObservableObject, @unchecked Sendable {
             case .js8call:
                 js8callModem = JS8CallModem(configuration: .normal)
                 js8callModem?.delegate = self
+
+            case .ft8:
+                ft8Modem = FT8Modem()
+                ft8Modem?.delegate = self
             }
             #endif
         }
@@ -668,6 +688,8 @@ class ModemService: ObservableObject, @unchecked Sendable {
             channelFrequencies = [1500.0]
         case .js8call:
             channelFrequencies = [1000.0]
+        case .ft8:
+            channelFrequencies = [1500.0]
         }
         #endif
     }
@@ -685,6 +707,7 @@ class ModemService: ObservableObject, @unchecked Sendable {
         bayesianCWDecoder?.reset()
         dualCWDecoder?.reset()
         js8callModem?.reset()
+        ft8Modem?.reset()
         #endif
 
         #if canImport(RattlegramCore)
@@ -779,6 +802,12 @@ class ModemService: ObservableObject, @unchecked Sendable {
                 js8callModem?.delegate = self
                 DispatchQueue.main.async { [weak self] in self?.channelFrequencies = [1000.0] }
             }
+        case .ft8:
+            if ft8Modem == nil {
+                ft8Modem = FT8Modem()
+                ft8Modem?.delegate = self
+                DispatchQueue.main.async { [weak self] in self?.channelFrequencies = [1500.0] }
+            }
         case .olivia, .rattlegram:
             break
         }
@@ -872,6 +901,11 @@ class ModemService: ObservableObject, @unchecked Sendable {
             js8callModem?.process(samples: samples)
             newStrength = 0
             newDecoding = js8callModem?.isSignalDetected ?? false
+
+        case .ft8:
+            ft8Modem?.process(samples: samples)
+            newStrength = 0
+            newDecoding = ft8Modem?.signalDetected ?? false
         }
 
         // Flush accumulated character callbacks in a single main-thread dispatch
@@ -967,6 +1001,15 @@ class ModemService: ObservableObject, @unchecked Sendable {
                 postambleMs: 200
             )
 
+        case .ft8:
+            let modem = ft8Modem ?? FT8Modem()
+            samples = modem.encodeWithEnvelope(
+                message: text,
+                frequency: 1500.0,
+                preambleMs: 0,
+                postambleMs: 200
+            )
+
         case .olivia, .rattlegram:
             return nil
         }
@@ -1056,6 +1099,15 @@ class ModemService: ObservableObject, @unchecked Sendable {
                 postambleMs: 200
             )
 
+        case .ft8:
+            let txModem = FT8Modem()
+            return txModem.encodeWithEnvelope(
+                message: text,
+                frequency: frequency ?? 1500.0,
+                preambleMs: 0,
+                postambleMs: 200
+            )
+
         case .olivia, .rattlegram:
             return []
         }
@@ -1078,8 +1130,8 @@ class ModemService: ObservableObject, @unchecked Sendable {
             guard let modem = pskModem else { return nil }
             samples = modem.generateIdle(duration: duration)
 
-        case .cw, .olivia, .rattlegram, .js8call:
-            // CW/JS8Call don't have a continuous idle tone
+        case .cw, .olivia, .rattlegram, .js8call, .ft8:
+            // CW/JS8Call/FT8 don't have a continuous idle tone
             return nil
         }
 
@@ -1132,8 +1184,8 @@ class ModemService: ObservableObject, @unchecked Sendable {
             // Generate idle carrier for PSK phase lock
             return txModem.generateIdle(duration: durationSeconds)
 
-        case .cw, .olivia, .rattlegram, .js8call:
-            // CW/Rattlegram/JS8Call have built-in sync, no preamble needed
+        case .cw, .olivia, .rattlegram, .js8call, .ft8:
+            // CW/Rattlegram/JS8Call/FT8 have built-in sync, no preamble needed
             return nil
         }
         #else
@@ -1478,4 +1530,40 @@ extension ModemService: CWModemDelegate {
 
 // BayesianCWDecoder uses closure callbacks (onCharacterDecoded, onSignalDetected)
 // wired up at creation time above — no delegate extension needed.
+
+// MARK: - FT8ModemDelegate
+
+extension ModemService: FT8ModemDelegate {
+    nonisolated func modem(
+        _ modem: FT8Modem,
+        didDecode message: FT8Message,
+        frequency: Double,
+        snr: Double,
+        timeOffset: Double
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.delegate?.modemService(
+                self,
+                didDecodeMessage: message.displayText,
+                callSign: nil,
+                bitFlips: 0,
+                onChannel: frequency,
+                mode: .ft8
+            )
+        }
+    }
+
+    nonisolated func modem(
+        _ modem: FT8Modem,
+        signalDetected detected: Bool,
+        count: Int
+    ) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isDecoding = detected
+            self.delegate?.modemService(self, signalDetected: detected, onChannel: 1500.0, mode: .ft8)
+        }
+    }
+}
 #endif

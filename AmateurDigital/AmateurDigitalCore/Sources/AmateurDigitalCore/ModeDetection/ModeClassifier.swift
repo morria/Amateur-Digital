@@ -59,7 +59,11 @@ public struct Evidence {
 /// Classifies digital modes by scoring spectral features against known mode characteristics.
 public struct ModeClassifier {
 
-    public init() {}
+    public let config: ClassifierConfig
+
+    public init(config: ClassifierConfig = .fromEnvironment()) {
+        self.config = config
+    }
 
     /// Score all supported modes against the given spectral features.
     /// Returns scores sorted by confidence descending (most likely first).
@@ -71,9 +75,9 @@ public struct ModeClassifier {
         // - Must not be broadband noise (spectral flatness < 0.8)
         // - Peak bandwidth must be < 100 Hz (ambient noise peaks are 100-300 Hz wide)
         let topPeak = features.peaks.first
-        let hasStrongPeak = topPeak.map { $0.powerAboveNoise > 12 } ?? false
-        let hasNarrowPeak = topPeak.map { $0.bandwidth3dB < 100 } ?? false
-        let isNotBroadband = features.spectralFlatness < 0.8
+        let hasStrongPeak = topPeak.map { $0.powerAboveNoise > config.signalPeakThresholdDB } ?? false
+        let hasNarrowPeak = topPeak.map { Float($0.bandwidth3dB) < config.signalPeakBWMax } ?? false
+        let isNotBroadband = features.spectralFlatness < config.signalFlatnessMax
         let hasSignal = hasStrongPeak && (hasNarrowPeak || isNotBroadband)
 
         var scores = modes.map { mode in
@@ -92,12 +96,12 @@ public struct ModeClassifier {
     /// Score noise/no-signal likelihood.
     public func scoreNoise(features f: SpectralFeatures) -> NoiseScore {
         var evidence: [Evidence] = []
-        var score: Float = 0.3 // moderate prior — noise is common
+        var score: Float = config.noiseBasePrior
 
         // No peaks above noise floor
         let strongPeaks = f.peaks.filter { $0.powerAboveNoise > 10 }
         if strongPeaks.isEmpty {
-            score += 0.50
+            score += config.noiseNoPeakBonus
             evidence.append(Evidence(
                 label: "No strong spectral peaks",
                 impact: 0.50,
@@ -118,10 +122,10 @@ public struct ModeClassifier {
         // High spectral flatness → noise-like
         // Training data: ambient noise flatness > 0.95, signals < 0.3
         if f.spectralFlatness > 0.8 {
-            score += 0.40
+            score += config.noiseBroadbandBonus
             evidence.append(Evidence(
                 label: "Broadband noise spectrum",
-                impact: 0.40,
+                impact: config.noiseBroadbandBonus,
                 detail: "Spectral flatness \(String(format: "%.2f", f.spectralFlatness)) — broadband noise, no signal structure"
             ))
         } else if f.spectralFlatness > 0.5 {
@@ -143,20 +147,20 @@ public struct ModeClassifier {
         // Wide peak bandwidth → noise (real signals have narrow peaks < 60 Hz)
         // Training data: ambient noise topPeakBW = 117-275 Hz, signals < 53 Hz
         if let topPeak = f.peaks.first, topPeak.bandwidth3dB > 80 {
-            score += 0.20
+            score += config.noiseWidePeakBonus
             evidence.append(Evidence(
                 label: "Very wide peaks (noise-like)",
-                impact: 0.20,
+                impact: config.noiseWidePeakBonus,
                 detail: "Widest peak is \(Int(topPeak.bandwidth3dB)) Hz — real signals have peaks < 60 Hz"
             ))
         }
 
         // Weak peaks → more noise-like (real signals are 30+ dB above noise)
         if let topPeak = f.peaks.first, topPeak.powerAboveNoise < 15 && topPeak.powerAboveNoise > 0 {
-            score += 0.15
+            score += config.noiseWeakPeakBonus
             evidence.append(Evidence(
                 label: "Weak peaks",
-                impact: 0.15,
+                impact: config.noiseWeakPeakBonus,
                 detail: "Strongest peak is only \(String(format: "+%.0f", topPeak.powerAboveNoise)) dB — real signals are typically 30+ dB above noise"
             ))
         }
@@ -175,10 +179,10 @@ public struct ModeClassifier {
         // Only count narrow peaks (< 25 Hz) — wider peaks (47+ Hz) could be GFSK (JS8Call)
         let hasNarrowStrongPeak = strongPeaks.first.map { $0.bandwidth3dB < 25 } ?? false
         if hasNarrowStrongPeak && f.envelopeStats.coefficientOfVariation < 0.05 {
-            score += 0.50
+            score += config.noiseCarrierBonus
             evidence.append(Evidence(
                 label: "Unmodulated carrier",
-                impact: 0.50,
+                impact: config.noiseCarrierBonus,
                 detail: "Narrow tone with no modulation (CV \(String(format: "%.3f", f.envelopeStats.coefficientOfVariation))) — not a digital mode signal"
             ))
         } else if !strongPeaks.isEmpty && f.envelopeStats.coefficientOfVariation < 0.02 {
@@ -267,7 +271,7 @@ public struct ModeClassifier {
 
     private func scoreRTTY(_ f: SpectralFeatures) -> ModeScore {
         var evidence: [Evidence] = []
-        var score: Float = 0.05 // low base prior
+        var score: Float = config.rttyBasePrior
 
         // --- OOK penalty: RTTY is constant-envelope FSK, never has on-off keying ---
         if f.envelopeStats.hasOnOffKeying {
@@ -813,17 +817,17 @@ public struct ModeClassifier {
         // 10ms-block envelope sees almost no transitions (0.5/s).
         // CW: 4-14/s, PSK: 26-41/s, RTTY: 47-52/s
         if f.envelopeStats.transitionRate < 2.0 && f.envelopeStats.coefficientOfVariation > 0.1 {
-            score += 0.40
+            score += config.js8LowTransitionBonus
             evidence.append(Evidence(
                 label: "Very low transition rate (GFSK)",
-                impact: 0.40,
+                impact: config.js8LowTransitionBonus,
                 detail: "\(String(format: "%.1f", f.envelopeStats.transitionRate)) transitions/sec — consistent with JS8Call/FT8 (smooth GFSK modulation)"
             ))
         } else if f.envelopeStats.transitionRate < 5.0 && f.envelopeStats.coefficientOfVariation > 0.1 {
-            score += 0.15
+            score += config.js8MedTransitionBonus
             evidence.append(Evidence(
                 label: "Low transition rate",
-                impact: 0.15,
+                impact: config.js8MedTransitionBonus,
                 detail: "\(String(format: "%.1f", f.envelopeStats.transitionRate)) transitions/sec — possibly GFSK"
             ))
         } else if f.envelopeStats.transitionRate > 10 {
@@ -833,10 +837,10 @@ public struct ModeClassifier {
             let isGFSKConstantEnvelope = f.envelopeStats.coefficientOfVariation < 0.1
                 && f.peaks.first.map({ $0.bandwidth3dB > 20 && $0.bandwidth3dB < 70 }) == true
             if !isGFSKConstantEnvelope {
-                score -= 0.15
+                score -= config.js8HighTransitionPenalty
                 evidence.append(Evidence(
                     label: "High transition rate (not JS8Call)",
-                    impact: -0.15,
+                    impact: -config.js8HighTransitionPenalty,
                     detail: "\(String(format: "%.0f", f.envelopeStats.transitionRate)) transitions/sec — JS8Call has < 2/sec"
                 ))
             }
@@ -844,11 +848,11 @@ public struct ModeClassifier {
 
         // --- Peak bandwidth ~47-53 Hz ---
         if let topPeak = f.peaks.first {
-            if topPeak.bandwidth3dB > 20 && topPeak.bandwidth3dB < 70 {
-                score += 0.15
+            if Float(topPeak.bandwidth3dB) > config.js8PeakBWMin && Float(topPeak.bandwidth3dB) < config.js8PeakBWMax {
+                score += config.js8PeakBWBonus
                 evidence.append(Evidence(
                     label: "Peak bandwidth matches JS8Call",
-                    impact: 0.15,
+                    impact: config.js8PeakBWBonus,
                     detail: "Peak bandwidth \(String(format: "%.0f", topPeak.bandwidth3dB)) Hz matches JS8Call GFSK (~50 Hz)"
                 ))
 
@@ -856,10 +860,10 @@ public struct ModeClassifier {
                 // After silence trimming, the active GFSK burst has very low CV.
                 // This distinguishes it from PSK (which has raised-cosine envelope shaping).
                 if f.envelopeStats.coefficientOfVariation < 0.1 && topPeak.powerAboveNoise > 15 {
-                    score += 0.25
+                    score += config.js8GFSKCVBonus
                     evidence.append(Evidence(
                         label: "Constant-envelope GFSK",
-                        impact: 0.25,
+                        impact: config.js8GFSKCVBonus,
                         detail: "CV \(String(format: "%.3f", f.envelopeStats.coefficientOfVariation)) + GFSK-width peak — consistent with JS8Call constant-envelope FSK"
                     ))
                 }
@@ -930,12 +934,12 @@ public struct ModeClassifier {
         // 6.25 Hz is a universal subharmonic that appears in all signals' cyclostationary
         // spectra, so we can't trust it without additional spectral evidence.
         let hasJS8SpectralShape = peaksAbove10dB <= 5
-            && (f.peaks.first.map { $0.bandwidth3dB > 20 && $0.bandwidth3dB < 70 } ?? false)
+            && (f.peaks.first.map { Float($0.bandwidth3dB) > config.js8PeakBWMin && Float($0.bandwidth3dB) < config.js8PeakBWMax } ?? false)
         if f.baudRateConfidence > 0.5 && abs(f.estimatedBaudRate - 6.25) < 1.0 && hasJS8SpectralShape {
-            score += 0.25
+            score += config.js8BaudRateBonus
             evidence.append(Evidence(
                 label: "Baud rate matches JS8Call/FT8",
-                impact: 0.25,
+                impact: config.js8BaudRateBonus,
                 detail: "Estimated \(String(format: "%.1f", f.estimatedBaudRate)) baud + GFSK-like spectrum"
             ))
         } else if f.baudRateConfidence > 0.3 && f.estimatedBaudRate > 10 {
@@ -964,7 +968,7 @@ public struct ModeClassifier {
 
         var evidence = js8Score.evidence
         // FT8 is ~100x more common than JS8Call on HF — slight prior boost
-        let ft8Boost: Float = 0.03
+        let ft8Boost: Float = config.ft8PriorBoost
         evidence.append(Evidence(
             label: "FT8 prior (more common than JS8Call)",
             impact: ft8Boost,

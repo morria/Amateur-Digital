@@ -612,52 +612,9 @@ func generateTrainingSet(rng: inout SeededRandom) -> [(mode: String, condition: 
         set.append((mode, "real-\(basename)", wavSamples))
     }
 
-    // --- Verified SDR corpus (human-reviewed, signal confirmed) ---
-    // Uses verified/ subdirectories: rtty/, psk31/, ft8/, noise/, unknown/
-    // Each subdirectory name IS the verified label.
-    let corpusBaseDir = "/Users/asm/d/sdr-sampler/corpus/verified"
-    // unknown/ contains CW-labeled files that don't have CW — exclude.
-    let verifiedModeMap: [String: String] = [
-        "rtty": "RTTY", "psk31": "PSK31", "ft8": "FT8",
-        "noise": "noise", "cw": "CW", "js8call": "JS8Call",
-    ]
-
-    for (dirName, expectedMode) in verifiedModeMap {
-        let modeDir = "\(corpusBaseDir)/\(dirName)"
-        guard let files = try? FileManager.default.contentsOfDirectory(atPath: modeDir) else { continue }
-        for file in files.sorted() where file.hasSuffix(".wav") {
-
-            let path = "\(modeDir)/\(file)"
-            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-                  data.count > 44 else { continue }
-
-            let bitsPerSample = Int(data[34..<36].withUnsafeBytes { $0.loadUnaligned(as: UInt16.self) })
-            guard bitsPerSample == 16 else { continue }
-
-            var dataOffset = 12
-            while dataOffset + 8 < data.count {
-                let chunkID = String(data: data[dataOffset..<dataOffset+4], encoding: .ascii) ?? ""
-                let chunkSize = Int(data[dataOffset+4..<dataOffset+8].withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) })
-                if chunkID == "data" { dataOffset += 8; break }
-                dataOffset += 8 + chunkSize
-            }
-
-            let totalSamples = (data.count - dataOffset) / 2
-            guard totalSamples > minSamples else { continue }
-
-            let startSample = min(totalSamples / 2 - minSamples / 2, totalSamples - minSamples)
-            var wavSamples = [Float](repeating: 0, count: minSamples)
-            for i in 0..<minSamples {
-                let offset = dataOffset + (startSample + i) * 2
-                guard offset + 1 < data.count else { break }
-                let v = data[offset..<offset+2].withUnsafeBytes { $0.loadUnaligned(as: Int16.self) }
-                wavSamples[i] = Float(v) / 32768.0
-            }
-
-            let label = "sdr-\(dirName)/\(file.replacingOccurrences(of: ".wav", with: ""))"
-            set.append((expectedMode, label, wavSamples))
-        }
-    }
+    // SDR corpus samples disabled — the current recordings aren't reliable enough
+    // for training. Waiting for properly verified recordings with confirmed signals.
+    // The ClassifierConfig + Optuna infrastructure is ready for when good data arrives.
 
     return set
 }
