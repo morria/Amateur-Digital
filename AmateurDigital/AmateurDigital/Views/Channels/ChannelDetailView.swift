@@ -16,6 +16,7 @@ struct ChannelDetailView: View {
     @State private var dragOffset: CGFloat = 0
     @State private var showTimestamps = false
     @State private var showingChannelSettings = false
+    @State private var ft8AutoQSOEnabled = false
     @FocusState private var isTextFieldFocused: Bool
 
     private let timestampRevealThreshold: CGFloat = 60
@@ -203,6 +204,93 @@ struct ChannelDetailView: View {
 
                 Divider()
 
+                // FT8 mode: auto-QSO toggle instead of text input
+                if viewModel.selectedMode == .ft8 {
+                    ft8InputBar(channel: channel)
+                } else {
+                    standardInputBar(channel: channel)
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 2) {
+                        if let callsign = channel.callsign {
+                            Text(callsign)
+                                .font(.headline)
+                            Text("\(modeTitleText)  \(channel.frequencyOffsetDisplay)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text(modeTitleText)
+                                .font(.headline)
+                            Text(channel.frequencyOffsetDisplay)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    AudioLevelIndicator(level: viewModel.inputLevel)
+                    Button {
+                        showingChannelSettings = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                }
+            }
+            .sheet(isPresented: $showingChannelSettings) {
+                ChannelSettingsSheet(channel: channel, viewModel: viewModel)
+                    .id(channel.id)
+            }
+            .onAppear {
+                if let draft = viewModel.draftMessages[channelID], !draft.isEmpty {
+                    messageText = draft
+                }
+                viewModel.markChannelAsRead(channelID)
+            }
+            .onDisappear {
+                if messageText.isEmpty {
+                    viewModel.draftMessages[channelID] = nil
+                } else {
+                    viewModel.draftMessages[channelID] = messageText
+                }
+            }
+        } else {
+            ContentUnavailableView("Channel Deleted", systemImage: "trash")
+        }
+    }
+
+    // MARK: - FT8 Input Bar
+
+    @ViewBuilder
+    private func ft8InputBar(channel: Channel) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Auto QSO")
+                        .font(.headline)
+                    Text(ft8AutoQSOEnabled ? "Completing QSO automatically" : "Enable to start the exchange")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Toggle("", isOn: $ft8AutoQSOEnabled)
+                    .labelsHidden()
+                    .tint(.blue)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .background(Color(.systemBackground))
+    }
+
+    // MARK: - Standard Input Bar
+
+    @ViewBuilder
+    private func standardInputBar(channel: Channel) -> some View {
                 // Input bar
                 VStack(spacing: 0) {
                     // Frequency warning
@@ -287,58 +375,6 @@ struct ChannelDetailView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                 }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    VStack(spacing: 2) {
-                        if let callsign = channel.callsign {
-                            Text(callsign)
-                                .font(.headline)
-                            Text("\(modeTitleText)  \(channel.frequencyOffsetDisplay)")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        } else {
-                            Text(modeTitleText)
-                                .font(.headline)
-                            Text(channel.frequencyOffsetDisplay)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    AudioLevelIndicator(level: viewModel.inputLevel)
-                    Button {
-                        showingChannelSettings = true
-                    } label: {
-                        Image(systemName: "slider.horizontal.3")
-                    }
-                }
-            }
-            .sheet(isPresented: $showingChannelSettings) {
-                ChannelSettingsSheet(channel: channel, viewModel: viewModel)
-                    .id(channel.id) // Force recreation to ensure onAppear fires
-            }
-            .onAppear {
-                // Restore draft message
-                if let draft = viewModel.draftMessages[channelID], !draft.isEmpty {
-                    messageText = draft
-                }
-                // Mark channel as read
-                viewModel.markChannelAsRead(channelID)
-            }
-            .onDisappear {
-                // Save draft message
-                if messageText.isEmpty {
-                    viewModel.draftMessages[channelID] = nil
-                } else {
-                    viewModel.draftMessages[channelID] = messageText
-                }
-            }
-        } else {
-            ContentUnavailableView("Channel Deleted", systemImage: "trash")
-        }
     }
 
     private func sendMessage() {

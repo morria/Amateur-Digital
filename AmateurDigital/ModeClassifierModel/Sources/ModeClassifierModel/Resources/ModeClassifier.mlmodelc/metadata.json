@@ -1,12 +1,13 @@
 [
   {
     "metadataOutputVersion" : "3.0",
+    "shortDescription" : "Classifies digital mode signals from spectral features",
     "outputSchema" : [
       {
         "isOptional" : "0",
         "formattedType" : "Int64",
         "type" : "Int64",
-        "name" : "mode_index",
+        "name" : "mode",
         "shortDescription" : ""
       },
       {
@@ -21,6 +22,7 @@
     "modelParameters" : [
 
     ],
+    "author" : "Amateur Digital",
     "specificationVersion" : 1,
     "isUpdatable" : "0",
     "stateSchema" : [
@@ -136,6 +138,20 @@
         "type" : "Double",
         "name" : "baud_confidence",
         "shortDescription" : ""
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "costas_score",
+        "shortDescription" : ""
+      },
+      {
+        "isOptional" : "0",
+        "formattedType" : "Double",
+        "type" : "Double",
+        "name" : "costas_mode",
+        "shortDescription" : ""
       }
     ],
     "classLabels" : [
@@ -146,7 +162,8 @@
       4,
       5,
       6,
-      7
+      7,
+      8
     ],
     "generatedClassName" : "ModeClassifier",
     "userDefinedMetadata" : {

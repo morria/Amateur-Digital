@@ -75,7 +75,7 @@ guard lines.count > 1 else {
 let analyzer = SpectralAnalyzer(sampleRate: 48000)
 
 // CSV header
-print("mode,condition,bw,flatness,peaks,topPeakPower,topPeakBW,fskPairs,fskValley,cv,duty,transitions,ook,baudRate,baudConf")
+print("mode,condition,bw,flatness,peaks,topPeakPower,topPeakBW,fskPairs,fskValley,cv,duty,transitions,ook,baudRate,baudConf,costasScore,costasMode")
 
 var count = 0
 let total = lines.count - 1
@@ -110,7 +110,10 @@ for line in lines.dropFirst() {
     let baudRate = String(format: "%.2f", features.estimatedBaudRate)
     let baudConf = String(format: "%.3f", features.baudRateConfidence)
 
-    print("\(mode),\(condition),\(bw),\(flatness),\(peaks),\(topPeakPower),\(topPeakBW),\(fskPairs),\(fskValley),\(cv),\(duty),\(transitions),\(ook),\(baudRate),\(baudConf)")
+    let costasScore = String(format: "%.3f", features.costasScore)
+    let costasMode = features.costasMode
+
+    print("\(mode),\(condition),\(bw),\(flatness),\(peaks),\(topPeakPower),\(topPeakBW),\(fskPairs),\(fskValley),\(cv),\(duty),\(transitions),\(ook),\(baudRate),\(baudConf),\(costasScore),\(costasMode)")
 
     count += 1
     if count % 500 == 0 {

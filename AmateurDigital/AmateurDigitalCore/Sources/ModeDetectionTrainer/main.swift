@@ -612,9 +612,54 @@ func generateTrainingSet(rng: inout SeededRandom) -> [(mode: String, condition: 
         set.append((mode, "real-\(basename)", wavSamples))
     }
 
-    // SDR corpus samples disabled — the current recordings aren't reliable enough
-    // for training. Waiting for properly verified recordings with confirmed signals.
-    // The ClassifierConfig + Optuna infrastructure is ready for when good data arrives.
+    // --- Panoradio HF dataset (Scholl 2019) — professionally labeled synthetic signals ---
+    // Converted from IQ at 6 kHz to audio at 48 kHz via panoradio_to_wav.py
+    let panoradioDir = "/tmp/panoradio_wav"
+    let panoradioModeMap: [String: String] = [
+        "cw": "CW", "rtty": "RTTY", "psk31": "PSK31", "bpsk63": "BPSK63", "qpsk31": "QPSK31",
+    ]
+
+    for (dirName, expectedMode) in panoradioModeMap {
+        let modeDir = "\(panoradioDir)/\(dirName)"
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: modeDir) else { continue }
+        for file in files.sorted() where file.hasSuffix(".wav") {
+            let path = "\(modeDir)/\(file)"
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                  data.count > 44 else { continue }
+
+            let bitsPerSample = Int(data[34..<36].withUnsafeBytes { $0.loadUnaligned(as: UInt16.self) })
+            guard bitsPerSample == 16 else { continue }
+
+            var dataOffset = 12
+            while dataOffset + 8 < data.count {
+                let chunkID = String(data: data[dataOffset..<dataOffset+4], encoding: .ascii) ?? ""
+                let chunkSize = Int(data[dataOffset+4..<dataOffset+8].withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) })
+                if chunkID == "data" { dataOffset += 8; break }
+                dataOffset += 8 + chunkSize
+            }
+
+            let totalSamples = (data.count - dataOffset) / 2
+            let readCount = min(totalSamples, minSamples)
+            var wavSamples = [Float](repeating: 0, count: readCount)
+            for i in 0..<readCount {
+                let offset = dataOffset + i * 2
+                guard offset + 1 < data.count else { break }
+                let v = data[offset..<offset+2].withUnsafeBytes { $0.loadUnaligned(as: Int16.self) }
+                wavSamples[i] = Float(v) / 32768.0
+            }
+            // Pad to minSamples with zeros if needed.
+            // Panoradio clips may be short (~340ms) or longer (concatenated ~2s).
+            // The silence trimming in SpectralAnalyzer handles the padding correctly.
+            if wavSamples.count < minSamples {
+                wavSamples.append(contentsOf: [Float](repeating: 0, count: minSamples - wavSamples.count))
+            } else if wavSamples.count > minSamples {
+                wavSamples = Array(wavSamples.prefix(minSamples))
+            }
+
+            let label = "pan-\(dirName)/\(file.replacingOccurrences(of: ".wav", with: ""))"
+            set.append((expectedMode, label, wavSamples))
+        }
+    }
 
     return set
 }

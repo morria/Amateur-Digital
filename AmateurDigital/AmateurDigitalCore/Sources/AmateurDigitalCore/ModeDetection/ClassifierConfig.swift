@@ -14,40 +14,40 @@ import Foundation
 /// Can be overridden via environment variable for automated optimization.
 public struct ClassifierConfig {
 
-    // MARK: - Signal Detection Gate
-    public var signalPeakThresholdDB: Float = 12
+    // MARK: - Signal Detection Gate (Optuna-optimized)
+    public var signalPeakThresholdDB: Float = 14.0
     public var signalFlatnessMax: Float = 0.8
     public var signalPeakBWMax: Float = 100
 
     // MARK: - RTTY
     public var rttyBasePrior: Float = 0.05
     public var rttyFSKValleyBonus: Float = 0.55
-    public var rttyFSKNoValleyBonus3Plus: Float = 0.40
-    public var rttyFSKNoValleyCVMax: Float = 0.5
+    public var rttyFSKNoValleyBonus3Plus: Float = 0.26
+    public var rttyFSKNoValleyCVMax: Float = 0.56
     public var rttyFSKNoValleyTransMin: Float = 5
     public var rttyFSKNoValleyTransMax: Float = 60
     public var rttyBWBonus: Float = 0.15
-    public var rttyBWPenalty: Float = 0.15
-    public var rttyPeakBWThreshold: Float = 25
+    public var rttyBWPenalty: Float = 0.06
+    public var rttyPeakBWThreshold: Float = 22
     public var rttyPeakBWPenaltyMild: Float = 0.10
     public var rttyPeakBWPenaltySevere: Float = 0.20
 
     // MARK: - PSK
     public var pskNarrowPeakBonus: Float = 0.35
-    public var pskBWMatchBonus: Float = 0.15
-    public var pskMinPeakBW: Float = 22
+    public var pskBWMatchBonus: Float = 0.25
+    public var pskMinPeakBW: Float = 25
     public var pskCWNarrowPenalty: Float = 0.15
-    public var pskCVHighPenalty: Float = 0.25
+    public var pskCVHighPenalty: Float = 0.11
     public var pskCVHighTransMax: Float = 20
     public var pskOOKPenalty: Float = 0.15
-    public var pskFlatnessPenalty: Float = 0.15
+    public var pskFlatnessPenalty: Float = 0.20
     public var pskBaudRateBonus: Float = 0.20
     public var pskBaudRatePenalty: Float = 0.15
 
     // MARK: - CW
-    public var cwNarrowPeakThreshold: Float = 22
-    public var cwNarrowPeakBonus: Float = 0.45
-    public var cwOOKBonus: Float = 0.35
+    public var cwNarrowPeakThreshold: Float = 21
+    public var cwNarrowPeakBonus: Float = 0.37
+    public var cwOOKBonus: Float = 0.42
     public var cwPartialCVMin: Float = 0.10
     public var cwChannelBroadenedCVMin: Float = 0.6
     public var cwChannelBroadenedBonus: Float = 0.35
@@ -56,24 +56,26 @@ public struct ClassifierConfig {
     public var cwDutyCycleBonus: Float = 0.10
 
     // MARK: - JS8Call / FT8
-    public var js8LowTransitionBonus: Float = 0.40
+    public var js8LowTransitionBonus: Float = 0.44
     public var js8MedTransitionBonus: Float = 0.15
     public var js8HighTransitionPenalty: Float = 0.15
     public var js8PeakBWMin: Float = 20
     public var js8PeakBWMax: Float = 70
     public var js8PeakBWBonus: Float = 0.15
-    public var js8GFSKCVBonus: Float = 0.25
+    public var js8GFSKCVBonus: Float = 0.17
     public var js8FewPeaksBonus: Float = 0.10
     public var js8ManyPeaksPenalty: Float = 0.15
-    public var js8BaudRateBonus: Float = 0.25
+    public var js8BaudRateBonus: Float = 0.36
+    public var js8CostasBonus: Float = 0.40
     public var ft8PriorBoost: Float = 0.03
+    public var ft8CostasBonus: Float = 0.25
 
     // MARK: - Noise
     public var noiseBasePrior: Float = 0.3
     public var noiseNoPeakBonus: Float = 0.50
-    public var noiseBroadbandBonus: Float = 0.40
+    public var noiseBroadbandBonus: Float = 0.31
     public var noiseWidePeakBonus: Float = 0.20
-    public var noiseWeakPeakBonus: Float = 0.15
+    public var noiseWeakPeakBonus: Float = 0.11
     public var noiseCarrierBonus: Float = 0.50
 
     // MARK: - Loading
@@ -112,6 +114,8 @@ public struct ClassifierConfig {
         if let v = dict["noise_weak_peak_bonus"] { config.noiseWeakPeakBonus = Float(v) }
         if let v = dict["noise_broadband_bonus"] { config.noiseBroadbandBonus = Float(v) }
         if let v = dict["ft8_prior_boost"] { config.ft8PriorBoost = Float(v) }
+        if let v = dict["js8_costas_bonus"] { config.js8CostasBonus = Float(v) }
+        if let v = dict["ft8_costas_bonus"] { config.ft8CostasBonus = Float(v) }
 
         return config
     }

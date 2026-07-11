@@ -31,6 +31,7 @@
   .mode-slide { display: flex; gap: 1.5em; align-items: flex-start; margin-top: 0.3em; }
   .mode-slide .wf-col { flex: 0 0 220px; text-align: center; }
   .mode-slide .wf-col canvas { border-radius: 6px; width: 220px; image-rendering: pixelated; }
+  .mode-slide .wf-col img { width: 220px; border-radius: 6px; display: block; margin: 0 auto; }
   .mode-slide .wf-label { font-size: 0.5em; color: #888; margin-top: 4px; }
   .mode-slide .info-col { flex: 1; text-align: left; font-size: 0.72em; }
   .mode-slide .info-col p { margin: 0.4em 0; line-height: 1.5; }
@@ -41,6 +42,32 @@
   .mode-slide .stat { background: rgba(255,255,255,0.06); border-radius: 6px; padding: 0.3em 0.7em; }
   .mode-slide .stat .label { font-size: 0.8em; color: #888; }
   .mode-slide .stat .value { font-size: 1.05em; color: #fff; }
+
+  /* Audio player */
+  .mode-slide audio, .wf-col audio {
+    width: 200px;
+    height: 32px;
+    margin-top: 8px;
+    filter: invert(1) hue-rotate(180deg);
+    opacity: 0.8;
+  }
+
+  /* SNR comparison slides */
+  .snr-slide img { max-width: 90%; border-radius: 8px; margin-top: 0.5em; }
+  .snr-slide .dim { margin-top: 0.5em; }
+
+  /* Spectrum slides */
+  .spectrum-slide img { max-width: 70%; border-radius: 6px; margin-top: 0.5em; }
+
+  /* Signal gallery */
+  .signal-gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px 20px; margin-top: 0.5em; }
+  .signal-gallery .sig-card { text-align: center; }
+  .signal-gallery .sig-card img { width: 100%; max-height: 200px; object-fit: contain; border-radius: 6px; }
+  .signal-gallery .sig-card .sig-name { font-size: 0.55em; color: #ccc; margin-top: 4px; }
+  .signal-gallery .sig-card .sig-desc { font-size: 0.42em; color: #888; margin-top: 1px; }
+
+  /* Down arrow hint for vertical slides */
+  .down-hint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); color: #555; font-size: 0.5em; }
 </style>
 </head>
 <body>
@@ -69,32 +96,22 @@
       <svg viewBox="0 0 800 100" width="900" height="100" style="flex-shrink:0;">
         <line x1="0" y1="55" x2="800" y2="55" stroke="#333" stroke-width="0.5"/>
         <g fill="none" stroke="#5bf" stroke-width="2.5">
-          <!-- silence -->
           <path d="M0,55 L40,55"/>
-          <!-- dit (E) -->
           <path d="M40,55 C43,55 43,18 46,18 L76,18 C79,18 79,55 82,55"/>
           <path d="M82,55 L112,55"/>
-          <!-- dah (T) -->
           <path d="M112,55 C115,55 115,18 118,18 L208,18 C211,18 211,55 214,55"/>
           <path d="M214,55 L244,55"/>
-          <!-- dit -->
           <path d="M244,55 C247,55 247,18 250,18 L280,18 C283,18 283,55 286,55"/>
           <path d="M286,55 L316,55"/>
-          <!-- dit -->
           <path d="M316,55 C319,55 319,18 322,18 L352,18 C355,18 355,55 358,55"/>
-          <!-- word space -->
           <path d="M358,55 L448,55"/>
-          <!-- dah -->
           <path d="M448,55 C451,55 451,18 454,18 L544,18 C547,18 547,55 550,55"/>
           <path d="M550,55 L580,55"/>
-          <!-- dah -->
           <path d="M580,55 C583,55 583,18 586,18 L676,18 C679,18 679,55 682,55"/>
           <path d="M682,55 L712,55"/>
-          <!-- dit -->
           <path d="M712,55 C715,55 715,18 718,18 L748,18 C751,18 751,55 754,55"/>
           <path d="M754,55 L800,55"/>
         </g>
-        <!-- labels -->
         <text x="61" y="12" fill="#5bf" font-size="13" font-family="sans-serif" text-anchor="middle">dit</text>
         <text x="163" y="12" fill="#5bf" font-size="13" font-family="sans-serif" text-anchor="middle">dah</text>
         <text x="263" y="12" fill="#5bf" font-size="13" font-family="sans-serif" text-anchor="middle">dit</text>
@@ -112,13 +129,9 @@
       <svg viewBox="0 0 800 100" width="900" height="100" style="flex-shrink:0;">
         <defs><clipPath id="fsk-clip2"><rect x="0" y="0" width="800" height="100"/></clipPath></defs>
         <g clip-path="url(#fsk-clip2)">
-          <!-- Mark (higher freq, tighter waves) -->
           <path d="M0,50 Q6,20 12,50 Q18,80 24,50 Q30,20 36,50 Q42,80 48,50 Q54,20 60,50 Q66,80 72,50 Q78,20 84,50 Q90,80 96,50 Q102,20 108,50 Q114,80 120,50 Q126,20 132,50 Q138,80 144,50 Q150,20 156,50 Q162,80 168,50 Q174,20 180,50 Q186,80 192,50 Q198,20 200,50" stroke="#5bf" stroke-width="2" fill="none"/>
-          <!-- Space (lower freq, wider waves) -->
           <path d="M200,50 Q215,20 230,50 Q245,80 260,50 Q275,20 290,50 Q305,80 320,50 Q335,20 350,50 Q365,80 380,50 Q395,20 400,50" stroke="#f85" stroke-width="2" fill="none"/>
-          <!-- Mark -->
           <path d="M400,50 Q406,20 412,50 Q418,80 424,50 Q430,20 436,50 Q442,80 448,50 Q454,20 460,50 Q466,80 472,50 Q478,20 484,50 Q490,80 496,50 Q502,20 508,50 Q514,80 520,50 Q526,20 532,50 Q538,80 544,50 Q550,20 556,50 Q562,80 568,50 Q574,20 580,50 Q586,80 592,50 Q598,20 600,50" stroke="#5bf" stroke-width="2" fill="none"/>
-          <!-- Space -->
           <path d="M600,50 Q615,20 630,50 Q645,80 660,50 Q675,20 690,50 Q705,80 720,50 Q735,20 750,50 Q765,80 780,50 Q795,20 800,40" stroke="#f85" stroke-width="2" fill="none"/>
         </g>
         <text x="100" y="95" fill="#5bf" font-size="13" font-family="sans-serif" text-anchor="middle">mark (1)</text>
@@ -141,40 +154,36 @@
   <div style="display:flex; flex-direction:column; gap:2em; margin-top:1em;">
 
     <div style="display:flex; align-items:center; gap:1.5em; font-size:0.8em;">
-      <div style="min-width:180px; text-align:right;"><strong>BPSK</strong><br><span class="dim">PSK31, PSK63</span></div>
-      <svg viewBox="0 0 800 100" width="900" height="100" style="flex-shrink:0;">
-        <!-- phase 0 -->
+      <div style="min-width:180px; text-align:right;"><strong>PSK</strong><br><span class="dim">Phase-Shift Keying</span></div>
+      <svg viewBox="0 0 800 140" width="900" height="140" style="flex-shrink:0;">
+        <!-- BPSK waveform -->
+        <text x="0" y="12" fill="#5bf" font-size="11" font-family="sans-serif">BPSK (2 phases: 0&deg; and 180&deg;)</text>
         <path d="M0,50 Q10,20 20,50 Q30,80 40,50 Q50,20 60,50 Q70,80 80,50 Q90,20 100,50 Q110,80 120,50 Q130,20 140,50 Q150,80 160,50 Q170,20 180,50 Q190,80 200,50" stroke="#5bf" stroke-width="2" fill="none"/>
-        <!-- phase 180 flip -->
         <path d="M200,50 Q210,80 220,50 Q230,20 240,50 Q250,80 260,50 Q270,20 280,50 Q290,80 300,50 Q310,20 320,50 Q330,80 340,50 Q350,20 360,50 Q370,80 380,50 Q390,20 400,50" stroke="#5bf" stroke-width="2" fill="none"/>
-        <!-- no flip -->
         <path d="M400,50 Q410,20 420,50 Q430,80 440,50 Q450,20 460,50 Q470,80 480,50 Q490,20 500,50 Q510,80 520,50 Q530,20 540,50 Q550,80 560,50 Q570,20 580,50 Q590,80 600,50" stroke="#5bf" stroke-width="2" fill="none"/>
-        <!-- phase 180 flip -->
         <path d="M600,50 Q610,80 620,50 Q630,20 640,50 Q650,80 660,50 Q670,20 680,50 Q690,80 700,50 Q710,20 720,50 Q730,80 740,50 Q750,20 760,50 Q770,80 780,50 Q790,20 800,50" stroke="#5bf" stroke-width="2" fill="none"/>
-        <!-- flip markers -->
-        <line x1="200" y1="5" x2="200" y2="90" stroke="#f55" stroke-width="1.2" stroke-dasharray="5,4"/>
-        <line x1="600" y1="5" x2="600" y2="90" stroke="#f55" stroke-width="1.2" stroke-dasharray="5,4"/>
-        <text x="200" y="99" fill="#f55" font-size="12" font-family="sans-serif" text-anchor="middle">phase flip = 1</text>
-        <text x="500" y="99" fill="#888" font-size="12" font-family="sans-serif" text-anchor="middle">no flip = 0</text>
-        <text x="600" y="99" fill="#f55" font-size="12" font-family="sans-serif" text-anchor="middle">phase flip = 1</text>
-        <text x="400" y="12" fill="#888" font-size="12" font-family="sans-serif" text-anchor="middle">Single tone &mdash; data encoded by reversing the phase. Extremely narrow bandwidth.</text>
+        <line x1="200" y1="18" x2="200" y2="80" stroke="#f55" stroke-width="1.2" stroke-dasharray="5,4"/>
+        <line x1="600" y1="18" x2="600" y2="80" stroke="#f55" stroke-width="1.2" stroke-dasharray="5,4"/>
+        <text x="200" y="92" fill="#f55" font-size="11" font-family="sans-serif" text-anchor="middle">180&deg; flip = 1</text>
+        <text x="400" y="92" fill="#888" font-size="11" font-family="sans-serif" text-anchor="middle">no flip = 0</text>
+        <text x="600" y="92" fill="#f55" font-size="11" font-family="sans-serif" text-anchor="middle">180&deg; flip = 1</text>
+        <!-- QPSK note -->
+        <text x="0" y="115" fill="#f85" font-size="11" font-family="sans-serif">QPSK (4 phases: 0&deg;, 90&deg;, 180&deg;, 270&deg;) &mdash; 2 bits per symbol, extra capacity used for error correction (Viterbi)</text>
+        <text x="400" y="135" fill="#888" font-size="12" font-family="sans-serif" text-anchor="middle">Single tone, data encoded by shifting the phase. Extremely narrow bandwidth (~60 Hz).</text>
       </svg>
     </div>
 
     <div style="display:flex; align-items:center; gap:1.5em; font-size:0.8em;">
-      <div style="min-width:180px; text-align:right;"><strong>MFSK</strong><br><span class="dim">Olivia</span></div>
+      <div style="min-width:180px; text-align:right;"><strong>MFSK</strong><br><span class="dim">Multi Frequency-Shift Keying<br>Olivia, DominoEX</span></div>
       <svg viewBox="0 0 800 100" width="900" height="100" style="flex-shrink:0;">
-        <!-- Horizontal tone lines -->
         <line x1="30" y1="15" x2="770" y2="15" stroke="#333" stroke-width="0.8"/>
         <line x1="30" y1="35" x2="770" y2="35" stroke="#333" stroke-width="0.8"/>
         <line x1="30" y1="55" x2="770" y2="55" stroke="#333" stroke-width="0.8"/>
         <line x1="30" y1="75" x2="770" y2="75" stroke="#333" stroke-width="0.8"/>
-        <!-- Tone labels -->
         <text x="22" y="19" fill="#666" font-size="11" font-family="sans-serif" text-anchor="end">f4</text>
         <text x="22" y="39" fill="#666" font-size="11" font-family="sans-serif" text-anchor="end">f3</text>
         <text x="22" y="59" fill="#666" font-size="11" font-family="sans-serif" text-anchor="end">f2</text>
         <text x="22" y="79" fill="#666" font-size="11" font-family="sans-serif" text-anchor="end">f1</text>
-        <!-- Active tones (larger, more visible dots hopping) -->
         <circle cx="80" cy="55" r="9" fill="#5bf" opacity="0.85"/>
         <circle cx="170" cy="15" r="9" fill="#5bf" opacity="0.85"/>
         <circle cx="260" cy="75" r="9" fill="#5bf" opacity="0.85"/>
@@ -183,7 +192,6 @@
         <circle cx="530" cy="75" r="9" fill="#5bf" opacity="0.85"/>
         <circle cx="620" cy="35" r="9" fill="#5bf" opacity="0.85"/>
         <circle cx="710" cy="55" r="9" fill="#5bf" opacity="0.85"/>
-        <!-- Connecting line -->
         <polyline points="80,55 170,15 260,75 350,35 440,15 530,75 620,35 710,55" stroke="#5bf" stroke-width="1.2" fill="none" opacity="0.3"/>
         <text x="400" y="97" fill="#888" font-size="12" font-family="sans-serif" text-anchor="middle">Multiple tones. Active frequency hops each symbol. Spread = robustness.</text>
       </svg>
@@ -207,7 +215,6 @@
     </div>
     <div style="flex:0 0 auto;">
       <svg viewBox="0 0 420 280" width="420" height="280">
-        <!-- 8 tone level lines -->
         <line x1="50" y1="20" x2="390" y2="20" stroke="#333" stroke-width="0.6"/>
         <line x1="50" y1="55" x2="390" y2="55" stroke="#333" stroke-width="0.6"/>
         <line x1="50" y1="90" x2="390" y2="90" stroke="#333" stroke-width="0.6"/>
@@ -216,7 +223,6 @@
         <line x1="50" y1="195" x2="390" y2="195" stroke="#333" stroke-width="0.6"/>
         <line x1="50" y1="230" x2="390" y2="230" stroke="#333" stroke-width="0.6"/>
         <line x1="50" y1="265" x2="390" y2="265" stroke="#333" stroke-width="0.6"/>
-        <!-- Tone labels -->
         <text x="42" y="24" fill="#666" font-size="11" font-family="sans-serif" text-anchor="end">7</text>
         <text x="42" y="59" fill="#666" font-size="11" font-family="sans-serif" text-anchor="end">6</text>
         <text x="42" y="94" fill="#666" font-size="11" font-family="sans-serif" text-anchor="end">5</text>
@@ -225,9 +231,7 @@
         <text x="42" y="199" fill="#666" font-size="11" font-family="sans-serif" text-anchor="end">2</text>
         <text x="42" y="234" fill="#666" font-size="11" font-family="sans-serif" text-anchor="end">1</text>
         <text x="42" y="269" fill="#666" font-size="11" font-family="sans-serif" text-anchor="end">0</text>
-        <!-- Smooth GFSK path -->
         <path d="M55,160 C75,160 80,90 100,90 C120,90 125,195 150,195 C175,195 180,20 200,20 C220,20 225,230 250,230 C275,230 280,125 300,125 C320,125 325,55 350,55 C375,55 380,265 390,265" stroke="#5bf" stroke-width="3" fill="none"/>
-        <!-- Dots at each symbol center -->
         <circle cx="75" cy="160" r="5" fill="#5bf"/>
         <circle cx="125" cy="90" r="5" fill="#5bf"/>
         <circle cx="175" cy="195" r="5" fill="#5bf"/>
@@ -236,7 +240,6 @@
         <circle cx="310" cy="125" r="5" fill="#5bf"/>
         <circle cx="355" cy="55" r="5" fill="#5bf"/>
         <circle cx="390" cy="265" r="5" fill="#5bf"/>
-        <!-- Bit labels under dots -->
         <text x="75" y="278" fill="#5bf" font-size="9" font-family="monospace" text-anchor="middle">011</text>
         <text x="125" y="278" fill="#5bf" font-size="9" font-family="monospace" text-anchor="middle">101</text>
         <text x="175" y="278" fill="#5bf" font-size="9" font-family="monospace" text-anchor="middle">010</text>
@@ -245,7 +248,6 @@
         <text x="310" y="278" fill="#5bf" font-size="9" font-family="monospace" text-anchor="middle">100</text>
         <text x="355" y="278" fill="#5bf" font-size="9" font-family="monospace" text-anchor="middle">110</text>
         <text x="390" y="278" fill="#5bf" font-size="9" font-family="monospace" text-anchor="middle">000</text>
-        <!-- Axis label -->
         <text x="15" y="145" fill="#888" font-size="10" font-family="sans-serif" text-anchor="middle" transform="rotate(-90,15,145)">frequency</text>
         <text x="220" y="292" fill="#888" font-size="10" font-family="sans-serif" text-anchor="middle">time &rarr; (each symbol = 0.16s = 3 bits)</text>
       </svg>
@@ -258,7 +260,7 @@
 <!-- ============================================ -->
 <section>
   <h2>OFDM</h2>
-  <h3>Used by Rattlegram and VARA</h3>
+  <h3>Orthogonal Frequency-Division Multiplexing &mdash; Used by Rattlegram and VARA</h3>
   <div style="display:flex; gap:2em; align-items:flex-start; margin-top:0.5em;">
     <div style="flex:1; text-align:left; font-size:0.68em; line-height:1.6;">
       <p>Instead of sending data on one tone at a time, OFDM sends data on <span class="highlight">dozens or hundreds of tones simultaneously</span>. Each tone is called a <strong>subcarrier</strong>.</p>
@@ -268,36 +270,25 @@
     </div>
     <div style="flex:0 0 auto;">
       <svg viewBox="0 0 420 280" width="420" height="280">
-        <!-- Frequency axis -->
         <line x1="30" y1="240" x2="400" y2="240" stroke="#666" stroke-width="1"/>
         <text x="215" y="265" fill="#888" font-size="10" font-family="sans-serif" text-anchor="middle">frequency &rarr;</text>
-        <!-- Amplitude axis -->
         <line x1="30" y1="20" x2="30" y2="240" stroke="#666" stroke-width="1"/>
         <text x="12" y="130" fill="#888" font-size="10" font-family="sans-serif" text-anchor="middle" transform="rotate(-90,12,130)">amplitude</text>
-        <!-- Sinc-like subcarrier peaks (overlapping but orthogonal) -->
-        <!-- Subcarrier 1 -->
         <path d="M30,240 Q45,240 60,240 Q70,240 80,240 C90,240 95,60 105,60 C115,60 120,240 130,240 Q145,245 160,240 Q200,238 240,240 Q300,240 400,240" stroke="#5bf" stroke-width="1.5" fill="none" opacity="0.7"/>
-        <!-- Subcarrier 2 -->
         <path d="M30,240 Q70,240 100,240 C130,240 145,80 160,80 C175,80 190,240 210,240 Q260,242 310,240 Q350,240 400,240" stroke="#f85" stroke-width="1.5" fill="none" opacity="0.7"/>
-        <!-- Subcarrier 3 -->
         <path d="M30,240 Q110,240 160,240 C195,240 205,100 215,100 C225,100 235,240 265,240 Q330,240 400,240" stroke="#5f5" stroke-width="1.5" fill="none" opacity="0.7"/>
-        <!-- Subcarrier 4 -->
         <path d="M30,240 Q150,240 215,240 C250,240 258,50 270,50 C282,50 290,240 320,240 Q360,240 400,240" stroke="#f5f" stroke-width="1.5" fill="none" opacity="0.7"/>
-        <!-- Subcarrier 5 -->
         <path d="M30,240 Q200,240 270,240 C305,240 312,110 325,110 C338,110 345,240 375,240 L400,240" stroke="#ff5" stroke-width="1.5" fill="none" opacity="0.7"/>
-        <!-- Peak markers -->
         <circle cx="105" cy="60" r="4" fill="#5bf"/>
         <circle cx="160" cy="80" r="4" fill="#f85"/>
         <circle cx="215" cy="100" r="4" fill="#5f5"/>
         <circle cx="270" cy="50" r="4" fill="#f5f"/>
         <circle cx="325" cy="110" r="4" fill="#ff5"/>
-        <!-- Zero crossing annotations -->
         <text x="105" y="50" fill="#5bf" font-size="9" font-family="sans-serif" text-anchor="middle">f1</text>
         <text x="160" y="70" fill="#f85" font-size="9" font-family="sans-serif" text-anchor="middle">f2</text>
         <text x="215" y="90" fill="#5f5" font-size="9" font-family="sans-serif" text-anchor="middle">f3</text>
         <text x="270" y="40" fill="#f5f" font-size="9" font-family="sans-serif" text-anchor="middle">f4</text>
         <text x="325" y="100" fill="#ff5" font-size="9" font-family="sans-serif" text-anchor="middle">f5</text>
-        <!-- Annotation -->
         <text x="215" y="278" fill="#888" font-size="10" font-family="sans-serif" text-anchor="middle">Each peak aligns with neighbors' zero-crossings = orthogonal</text>
       </svg>
     </div>
@@ -328,10 +319,13 @@
       <tr><td><strong>QPSK31</strong></td><td>QPSK</td><td>31.25 baud</td><td>~60 Hz</td><td>Viterbi</td><td>Freeform QSO</td><td>1998</td></tr>
       <tr><td><strong>PSK63</strong></td><td>BPSK/QPSK</td><td>62.5 baud</td><td>~125 Hz</td><td>Optional</td><td>Freeform QSO</td><td>~2000</td></tr>
       <tr><td><strong>Olivia</strong></td><td>MFSK</td><td>~30 WPM</td><td>125-2000 Hz</td><td>FEC</td><td>Freeform QSO</td><td>2005</td></tr>
+      <tr><td><strong>DominoEX</strong></td><td>MFSK</td><td>~70 WPM</td><td>~200 Hz</td><td>FEC</td><td>Freeform QSO</td><td>2004</td></tr>
+      <tr><td><strong>MT63</strong></td><td>OFDM</td><td>~100 WPM</td><td>500-2000 Hz</td><td>Interleaved FEC</td><td>Keyboard QSO</td><td>1998</td></tr>
       <tr><td><strong>FT8</strong></td><td>8-GFSK</td><td>Fixed 15s</td><td>~50 Hz</td><td>LDPC</td><td>Structured exchange</td><td>2017</td></tr>
       <tr><td><strong>FT4</strong></td><td>4-GFSK</td><td>Fixed 7.5s</td><td>~80 Hz</td><td>LDPC</td><td>Structured exchange</td><td>2019</td></tr>
       <tr><td><strong>JS8Call</strong></td><td>8-GFSK</td><td>Fixed 15s</td><td>~50 Hz</td><td>LDPC</td><td>Freeform messaging</td><td>2018</td></tr>
       <tr><td><strong>WSPR</strong></td><td>4-FSK</td><td>Fixed 2 min</td><td>~6 Hz</td><td>FEC</td><td>Beacon only</td><td>2008</td></tr>
+      <tr><td><strong>NAVTEX</strong></td><td>FSK</td><td>100 baud</td><td>~340 Hz</td><td>FEC (SITOR-B)</td><td>Maritime broadcast</td><td>1977</td></tr>
       <tr><td><strong>Rattlegram</strong></td><td>OFDM</td><td>170 B/1.4s</td><td>~1.6 kHz</td><td>Polar codes</td><td>Burst messages</td><td>2022</td></tr>
       <tr><td><strong>VARA</strong></td><td>OFDM</td><td>Up to 8.5 kbps</td><td>500-2300 Hz</td><td>FEC + ARQ</td><td>Data transfer</td><td>2017</td></tr>
     </tbody>
@@ -339,14 +333,64 @@
 </section>
 
 <!-- ============================================ -->
-<!-- CW -->
+<!-- SIGNAL GALLERY 1/3 — Narrowband digital -->
 <!-- ============================================ -->
+<section>
+  <h2>Signal Gallery (1/3)</h2>
+  <h3>Narrowband digital modes &mdash; real HF signals, 25 dB SNR</h3>
+  <div class="signal-gallery">
+    <div class="sig-card"><img src="assets/waterfalls/morse.png" alt="CW"><div class="sig-name">CW (Morse)</div><div class="sig-desc">On/off keying &mdash; ~100 Hz</div></div>
+    <div class="sig-card"><img src="assets/waterfalls/psk31.png" alt="PSK31"><div class="sig-name">PSK31</div><div class="sig-desc">Phase-shift keying &mdash; ~60 Hz</div></div>
+    <div class="sig-card"><img src="assets/waterfalls/psk63.png" alt="PSK63"><div class="sig-name">PSK63</div><div class="sig-desc">2x speed PSK &mdash; ~125 Hz</div></div>
+    <div class="sig-card"><img src="assets/waterfalls/qpsk31.png" alt="QPSK31"><div class="sig-name">QPSK31</div><div class="sig-desc">Quadrature PSK + FEC &mdash; ~60 Hz</div></div>
+    <div class="sig-card"><img src="assets/waterfalls/rtty45_170.png" alt="RTTY 45/170"><div class="sig-name">RTTY 45/170</div><div class="sig-desc">Amateur standard FSK &mdash; ~250 Hz</div></div>
+    <div class="sig-card"><img src="assets/waterfalls/rtty50_170.png" alt="RTTY 50/170"><div class="sig-name">RTTY 50/170</div><div class="sig-desc">Commercial FSK &mdash; ~250 Hz</div></div>
+  </div>
+</section>
+
+<!-- ============================================ -->
+<!-- SIGNAL GALLERY 2/3 — Wideband & multi-tone -->
+<!-- ============================================ -->
+<section>
+  <h2>Signal Gallery (2/3)</h2>
+  <h3>Multi-tone &amp; wideband digital modes &mdash; real HF signals, 25 dB SNR</h3>
+  <div class="signal-gallery">
+    <div class="sig-card"><img src="assets/waterfalls/olivia8_250.png" alt="Olivia 8/250"><div class="sig-name">Olivia 8/250</div><div class="sig-desc">8 tones, 250 Hz</div></div>
+    <div class="sig-card"><img src="assets/waterfalls/olivia16_500.png" alt="Olivia 16/500"><div class="sig-name">Olivia 16/500</div><div class="sig-desc">16 tones, 500 Hz</div></div>
+    <div class="sig-card"><img src="assets/waterfalls/olivia32_1000.png" alt="Olivia 32/1000"><div class="sig-name">Olivia 32/1000</div><div class="sig-desc">32 tones, 1000 Hz</div></div>
+    <div class="sig-card"><img src="assets/waterfalls/dominoex11.png" alt="DominoEX"><div class="sig-name">DominoEX 11</div><div class="sig-desc">Incremental FSK &mdash; ~200 Hz</div></div>
+    <div class="sig-card"><img src="assets/waterfalls/mt63_1000.png" alt="MT63"><div class="sig-name">MT63/1000</div><div class="sig-desc">64-tone OFDM &mdash; 1000 Hz</div></div>
+    <div class="sig-card"><img src="assets/waterfalls/rtty100_850.png" alt="RTTY 100/850"><div class="sig-name">RTTY 100/850</div><div class="sig-desc">Wide-shift FSK &mdash; ~1000 Hz</div></div>
+  </div>
+</section>
+
+<!-- ============================================ -->
+<!-- SIGNAL GALLERY 3/3 — Utility & analog -->
+<!-- ============================================ -->
+<section>
+  <h2>Signal Gallery (3/3)</h2>
+  <h3>Utility, broadcast &amp; analog modes &mdash; real HF signals, 25 dB SNR</h3>
+  <div class="signal-gallery">
+    <div class="sig-card"><img src="assets/waterfalls/navtex.png" alt="NAVTEX"><div class="sig-name">NAVTEX</div><div class="sig-desc">Maritime safety FSK &mdash; ~340 Hz</div></div>
+    <div class="sig-card"><img src="assets/waterfalls/fax.png" alt="Fax"><div class="sig-name">HF Fax</div><div class="sig-desc">Weather chart transmission</div></div>
+    <div class="sig-card"><img src="assets/waterfalls/olivia16_1000.png" alt="Olivia 16/1000"><div class="sig-name">Olivia 16/1000</div><div class="sig-desc">16 tones, 1000 Hz &mdash; wider spread</div></div>
+    <div class="sig-card"><img src="assets/waterfalls/usb.png" alt="USB"><div class="sig-name">USB (Voice)</div><div class="sig-desc">Upper sideband &mdash; ~3 kHz</div></div>
+    <div class="sig-card"><img src="assets/waterfalls/lsb.png" alt="LSB"><div class="sig-name">LSB (Voice)</div><div class="sig-desc">Lower sideband &mdash; ~3 kHz</div></div>
+    <div class="sig-card"><img src="assets/waterfalls/am.png" alt="AM"><div class="sig-name">AM (Broadcast)</div><div class="sig-desc">Carrier + sidebands &mdash; ~6 kHz</div></div>
+  </div>
+</section>
+
+<!-- ============================================ -->
+<!-- CW (vertical stack: main + SNR + spectrum) -->
+<!-- ============================================ -->
+<section>
 <section>
   <h2>CW (Morse Code)</h2>
   <div class="mode-slide">
     <div class="wf-col">
-      <canvas id="wf-cw" width="220" height="280"></canvas>
-      <div class="wf-label">Thin line, on/off dits and dahs</div>
+      <img src="assets/waterfalls/morse.png" alt="CW waterfall from real HF signal">
+      <div class="wf-label">Real signal &mdash; single tone, on/off keying</div>
+      <audio controls preload="none"><source src="assets/audio/morse.wav" type="audio/wav"></audio>
     </div>
     <div class="info-col">
       <p class="tagline">The oldest digital mode. A single tone switched on and off. Nothing simpler, nothing narrower.</p>
@@ -362,17 +406,32 @@
       </div>
     </div>
   </div>
+  <div class="down-hint">&darr; SNR comparison</div>
+</section>
+<section class="snr-slide">
+  <h2>CW &mdash; Signal vs Noise</h2>
+  <h3>The same CW signal at decreasing signal-to-noise ratios</h3>
+  <img src="assets/snr/morse.png" alt="CW SNR comparison">
+  <p class="dim">Panoradio HF dataset &mdash; dits and dahs become harder to distinguish as noise increases</p>
+</section>
+<section class="spectrum-slide">
+  <h2>CW &mdash; Power Spectrum</h2>
+  <img src="assets/spectra/morse.png" alt="CW power spectrum">
+  <p class="dim">Extremely narrow &mdash; all energy concentrated in a single tone</p>
+</section>
 </section>
 
 <!-- ============================================ -->
-<!-- RTTY -->
+<!-- RTTY (vertical stack) -->
 <!-- ============================================ -->
+<section>
 <section>
   <h2>RTTY</h2>
   <div class="mode-slide">
     <div class="wf-col">
-      <canvas id="wf-rtty" width="220" height="280"></canvas>
-      <div class="wf-label">Two parallel lines ~170 Hz apart</div>
+      <img src="assets/waterfalls/rtty45_170.png" alt="RTTY waterfall from real HF signal">
+      <div class="wf-label">Real signal &mdash; two tones 170 Hz apart</div>
+      <audio controls preload="none"><source src="assets/audio/rtty45_170.wav" type="audio/wav"></audio>
     </div>
     <div class="info-col">
       <p class="tagline">Two audio tones alternating &mdash; one for mark, one for space. The teletype of the airwaves since the 1930s.</p>
@@ -388,17 +447,55 @@
       </div>
     </div>
   </div>
+  <div class="down-hint">&darr; SNR comparison &amp; variants</div>
+</section>
+<section class="snr-slide">
+  <h2>RTTY &mdash; Signal vs Noise</h2>
+  <img src="assets/snr/rtty45_170.png" alt="RTTY SNR comparison">
+  <p class="dim">The characteristic two-tone pattern becomes harder to separate from noise at lower SNR</p>
+</section>
+<section>
+  <h2>RTTY Variants</h2>
+  <h3>Same modulation, different speeds and shifts</h3>
+  <div style="display:flex; gap:1.5em; justify-content:center; margin-top:0.5em;">
+    <div style="text-align:center;">
+      <img src="assets/waterfalls/rtty45_170.png" alt="RTTY 45/170" style="width:180px; border-radius:6px;">
+      <div class="dim" style="margin-top:4px;">45 baud / 170 Hz</div>
+      <div class="dim">Amateur standard</div>
+      <audio controls preload="none" style="width:170px; height:28px; margin-top:4px; filter:invert(1) hue-rotate(180deg); opacity:0.8;"><source src="assets/audio/rtty45_170.wav" type="audio/wav"></audio>
+    </div>
+    <div style="text-align:center;">
+      <img src="assets/waterfalls/rtty50_170.png" alt="RTTY 50/170" style="width:180px; border-radius:6px;">
+      <div class="dim" style="margin-top:4px;">50 baud / 170 Hz</div>
+      <div class="dim">Commercial/marine</div>
+      <audio controls preload="none" style="width:170px; height:28px; margin-top:4px; filter:invert(1) hue-rotate(180deg); opacity:0.8;"><source src="assets/audio/rtty50_170.wav" type="audio/wav"></audio>
+    </div>
+    <div style="text-align:center;">
+      <img src="assets/waterfalls/rtty100_850.png" alt="RTTY 100/850" style="width:180px; border-radius:6px;">
+      <div class="dim" style="margin-top:4px;">100 baud / 850 Hz</div>
+      <div class="dim">Wide shift &mdash; military/commercial</div>
+      <audio controls preload="none" style="width:170px; height:28px; margin-top:4px; filter:invert(1) hue-rotate(180deg); opacity:0.8;"><source src="assets/audio/rtty100_850.wav" type="audio/wav"></audio>
+    </div>
+  </div>
+</section>
+<section class="spectrum-slide">
+  <h2>RTTY &mdash; Power Spectrum</h2>
+  <img src="assets/spectra/rtty45_170.png" alt="RTTY power spectrum">
+  <p class="dim">Two distinct peaks = mark and space frequencies, ~170 Hz apart</p>
+</section>
 </section>
 
 <!-- ============================================ -->
-<!-- PSK31 / PSK63 -->
+<!-- PSK31 / PSK63 (vertical stack) -->
 <!-- ============================================ -->
+<section>
 <section>
   <h2>PSK31 / PSK63</h2>
   <div class="mode-slide">
     <div class="wf-col">
-      <canvas id="wf-psk31" width="220" height="280"></canvas>
-      <div class="wf-label">Hair-thin single trace</div>
+      <img src="assets/waterfalls/psk31.png" alt="PSK31 waterfall from real HF signal">
+      <div class="wf-label">Real signal &mdash; hair-thin single trace</div>
+      <audio controls preload="none"><source src="assets/audio/psk31.wav" type="audio/wav"></audio>
     </div>
     <div class="info-col">
       <p class="tagline">A single tone that flips its phase to carry data. The thinnest signal you'll see on a waterfall.</p>
@@ -414,10 +511,38 @@
       </div>
     </div>
   </div>
+  <div class="down-hint">&darr; SNR comparison &amp; PSK63</div>
+</section>
+<section class="snr-slide">
+  <h2>PSK31 &mdash; Signal vs Noise</h2>
+  <img src="assets/snr/psk31.png" alt="PSK31 SNR comparison">
+  <p class="dim">The thin trace remains surprisingly visible even at low SNR thanks to its extreme narrowness</p>
+</section>
+<section>
+  <h2>PSK Variants</h2>
+  <h3>Same modulation family, different speeds and phase schemes</h3>
+  <div style="display:flex; gap:1.5em; justify-content:center; margin-top:0.5em;">
+    <div style="text-align:center;">
+      <img src="assets/waterfalls/psk31.png" alt="PSK31" style="width:180px; border-radius:6px;">
+      <div class="dim" style="margin-top:4px;">BPSK31 &mdash; ~60 Hz</div>
+      <audio controls preload="none" style="width:170px; height:28px; margin-top:4px; filter:invert(1) hue-rotate(180deg); opacity:0.8;"><source src="assets/audio/psk31.wav" type="audio/wav"></audio>
+    </div>
+    <div style="text-align:center;">
+      <img src="assets/waterfalls/qpsk31.png" alt="QPSK31" style="width:180px; border-radius:6px;">
+      <div class="dim" style="margin-top:4px;">QPSK31 &mdash; ~60 Hz + FEC</div>
+      <audio controls preload="none" style="width:170px; height:28px; margin-top:4px; filter:invert(1) hue-rotate(180deg); opacity:0.8;"><source src="assets/audio/qpsk31.wav" type="audio/wav"></audio>
+    </div>
+    <div style="text-align:center;">
+      <img src="assets/waterfalls/psk63.png" alt="PSK63" style="width:180px; border-radius:6px;">
+      <div class="dim" style="margin-top:4px;">BPSK63 &mdash; ~125 Hz, 2x speed</div>
+      <audio controls preload="none" style="width:170px; height:28px; margin-top:4px; filter:invert(1) hue-rotate(180deg); opacity:0.8;"><source src="assets/audio/psk63.wav" type="audio/wav"></audio>
+    </div>
+  </div>
+</section>
 </section>
 
 <!-- ============================================ -->
-<!-- FT8 -->
+<!-- FT8 (canvas — no dataset equivalent) -->
 <!-- ============================================ -->
 <section>
   <h2>FT8</h2>
@@ -443,7 +568,7 @@
 </section>
 
 <!-- ============================================ -->
-<!-- FT4 -->
+<!-- FT4 (canvas) -->
 <!-- ============================================ -->
 <section>
   <h2>FT4</h2>
@@ -469,7 +594,7 @@
 </section>
 
 <!-- ============================================ -->
-<!-- JS8Call -->
+<!-- JS8Call (canvas) -->
 <!-- ============================================ -->
 <section>
   <h2>JS8Call</h2>
@@ -495,14 +620,16 @@
 </section>
 
 <!-- ============================================ -->
-<!-- Olivia -->
+<!-- Olivia (vertical stack) -->
 <!-- ============================================ -->
+<section>
 <section>
   <h2>Olivia</h2>
   <div class="mode-slide">
     <div class="wf-col">
-      <canvas id="wf-olivia" width="220" height="280"></canvas>
-      <div class="wf-label">Wide band with tone-hopping pattern</div>
+      <img src="assets/waterfalls/olivia16_500.png" alt="Olivia waterfall from real HF signal">
+      <div class="wf-label">Real signal &mdash; tones hopping across the band</div>
+      <audio controls preload="none"><source src="assets/audio/olivia16_500.wav" type="audio/wav"></audio>
     </div>
     <div class="info-col">
       <p class="tagline">A symphony of tones hopping across the band. Designed for the worst HF conditions where other modes fail.</p>
@@ -518,10 +645,152 @@
       </div>
     </div>
   </div>
+  <div class="down-hint">&darr; SNR comparison &amp; variants</div>
+</section>
+<section class="snr-slide">
+  <h2>Olivia &mdash; Signal vs Noise</h2>
+  <img src="assets/snr/olivia16_500.png" alt="Olivia SNR comparison">
+  <p class="dim">The multi-tone hopping pattern is remarkably resilient &mdash; individual tones still visible at low SNR</p>
+</section>
+<section>
+  <h2>Olivia Variants</h2>
+  <h3>More tones and wider bandwidth = more robust but slower</h3>
+  <div style="display:flex; gap:1em; justify-content:center; margin-top:0.5em;">
+    <div style="text-align:center;">
+      <img src="assets/waterfalls/olivia8_250.png" alt="Olivia 8/250" style="width:160px; border-radius:6px;">
+      <div class="dim" style="margin-top:4px;">8/250</div>
+      <div class="dim">8 tones, 250 Hz</div>
+      <audio controls preload="none" style="width:150px; height:28px; margin-top:4px; filter:invert(1) hue-rotate(180deg); opacity:0.8;"><source src="assets/audio/olivia8_250.wav" type="audio/wav"></audio>
+    </div>
+    <div style="text-align:center;">
+      <img src="assets/waterfalls/olivia16_500.png" alt="Olivia 16/500" style="width:160px; border-radius:6px;">
+      <div class="dim" style="margin-top:4px;">16/500</div>
+      <div class="dim">16 tones, 500 Hz</div>
+      <audio controls preload="none" style="width:150px; height:28px; margin-top:4px; filter:invert(1) hue-rotate(180deg); opacity:0.8;"><source src="assets/audio/olivia16_500.wav" type="audio/wav"></audio>
+    </div>
+    <div style="text-align:center;">
+      <img src="assets/waterfalls/olivia16_1000.png" alt="Olivia 16/1000" style="width:160px; border-radius:6px;">
+      <div class="dim" style="margin-top:4px;">16/1000</div>
+      <div class="dim">16 tones, 1000 Hz</div>
+      <audio controls preload="none" style="width:150px; height:28px; margin-top:4px; filter:invert(1) hue-rotate(180deg); opacity:0.8;"><source src="assets/audio/olivia16_1000.wav" type="audio/wav"></audio>
+    </div>
+    <div style="text-align:center;">
+      <img src="assets/waterfalls/olivia32_1000.png" alt="Olivia 32/1000" style="width:160px; border-radius:6px;">
+      <div class="dim" style="margin-top:4px;">32/1000</div>
+      <div class="dim">32 tones, 1000 Hz</div>
+      <audio controls preload="none" style="width:150px; height:28px; margin-top:4px; filter:invert(1) hue-rotate(180deg); opacity:0.8;"><source src="assets/audio/olivia32_1000.wav" type="audio/wav"></audio>
+    </div>
+  </div>
+</section>
 </section>
 
 <!-- ============================================ -->
-<!-- WSPR -->
+<!-- DominoEX (NEW — real data) -->
+<!-- ============================================ -->
+<section>
+<section>
+  <h2>DominoEX</h2>
+  <div class="mode-slide">
+    <div class="wf-col">
+      <img src="assets/waterfalls/dominoex11.png" alt="DominoEX waterfall from real HF signal">
+      <div class="wf-label">Real signal &mdash; frequency-hopping MFSK</div>
+      <audio controls preload="none"><source src="assets/audio/dominoex11.wav" type="audio/wav"></audio>
+    </div>
+    <div class="info-col">
+      <p class="tagline">A fast, nimble frequency-hopper. Encodes data in the <em>difference</em> between successive tones, making it robust to frequency drift.</p>
+      <div class="stats">
+        <div class="stat"><div class="label">Bandwidth</div><div class="value">~200 Hz</div></div>
+        <div class="stat"><div class="label">Speed</div><div class="value">~70 WPM (EX11)</div></div>
+        <div class="stat"><div class="label">Error correction</div><div class="value">FEC</div></div>
+        <div class="stat"><div class="label">Modulation</div><div class="value">IFK+ (incremental FSK)</div></div>
+      </div>
+      <p><strong>Excels at:</strong> Keyboard-to-keyboard chat on HF with good throughput. Handles ionospheric Doppler shift gracefully because it uses differential encoding &mdash; only the <em>change</em> in frequency matters, not the absolute value.</p>
+      <div class="interesting">
+        <strong>What makes it unique:</strong> Uses 18 tones but encodes data in the <em>difference</em> between consecutive tones (IFK+). This makes it inherently resistant to frequency drift and Doppler &mdash; a problem that plagues PSK31 on the higher HF bands. Faster than Olivia, narrower than MT63.
+      </div>
+    </div>
+  </div>
+  <div class="down-hint">&darr; SNR comparison</div>
+</section>
+<section class="snr-slide">
+  <h2>DominoEX &mdash; Signal vs Noise</h2>
+  <img src="assets/snr/dominoex11.png" alt="DominoEX SNR comparison">
+  <p class="dim">The hopping pattern holds up well as noise increases</p>
+</section>
+</section>
+
+<!-- ============================================ -->
+<!-- MT63 (NEW — real data) -->
+<!-- ============================================ -->
+<section>
+<section>
+  <h2>MT63</h2>
+  <div class="mode-slide">
+    <div class="wf-col">
+      <img src="assets/waterfalls/mt63_1000.png" alt="MT63 waterfall from real HF signal">
+      <div class="wf-label">Real signal &mdash; wide OFDM band</div>
+      <audio controls preload="none"><source src="assets/audio/mt63_1000.wav" type="audio/wav"></audio>
+    </div>
+    <div class="info-col">
+      <p class="tagline">A wide, resilient wall of tones. 64 subcarriers transmitting in parallel like a mini-OFDM system &mdash; years before WiFi.</p>
+      <div class="stats">
+        <div class="stat"><div class="label">Bandwidth</div><div class="value">500 / 1000 / 2000 Hz</div></div>
+        <div class="stat"><div class="label">Speed</div><div class="value">~100 WPM (1000 Hz mode)</div></div>
+        <div class="stat"><div class="label">Error correction</div><div class="value">Interleaved FEC</div></div>
+        <div class="stat"><div class="label">Modulation</div><div class="value">OFDM (64 tones)</div></div>
+      </div>
+      <p><strong>Excels at:</strong> Keyboard-to-keyboard chat in high-noise environments. The wide bandwidth and interleaving make it nearly impervious to impulse noise and narrowband interference.</p>
+      <div class="interesting">
+        <strong>What makes it unique:</strong> Uses long interleaving (~10 seconds) which means it takes a few seconds to "lock on" but once synced, it can decode through noise that wipes out every other keyboard mode. Popular on VHF nets and emergency communications channels.
+      </div>
+    </div>
+  </div>
+  <div class="down-hint">&darr; SNR comparison</div>
+</section>
+<section class="snr-slide">
+  <h2>MT63 &mdash; Signal vs Noise</h2>
+  <img src="assets/snr/mt63_1000.png" alt="MT63 SNR comparison">
+  <p class="dim">The wide OFDM band is remarkably resilient &mdash; individual carriers still decodable at very low SNR</p>
+</section>
+</section>
+
+<!-- ============================================ -->
+<!-- NAVTEX (NEW — real data) -->
+<!-- ============================================ -->
+<section>
+<section>
+  <h2>NAVTEX</h2>
+  <div class="mode-slide">
+    <div class="wf-col">
+      <img src="assets/waterfalls/navtex.png" alt="NAVTEX waterfall from real HF signal">
+      <div class="wf-label">Real signal &mdash; FSK maritime broadcast</div>
+      <audio controls preload="none"><source src="assets/audio/navtex.wav" type="audio/wav"></audio>
+    </div>
+    <div class="info-col">
+      <p class="tagline">Maritime safety broadcasts on long-wave. Weather warnings, navigational hazards, and search-and-rescue alerts delivered automatically to ships at sea.</p>
+      <div class="stats">
+        <div class="stat"><div class="label">Bandwidth</div><div class="value">~340 Hz</div></div>
+        <div class="stat"><div class="label">Speed</div><div class="value">100 baud</div></div>
+        <div class="stat"><div class="label">Error correction</div><div class="value">FEC (SITOR-B)</div></div>
+        <div class="stat"><div class="label">Modulation</div><div class="value">FSK (170 Hz shift)</div></div>
+      </div>
+      <p><strong>Excels at:</strong> Reliable one-way broadcast of safety information. Operates on 518 kHz (international) and 490 kHz (national). Every SOLAS-class vessel must carry a NAVTEX receiver.</p>
+      <div class="interesting">
+        <strong>What makes it unique:</strong> An FSK mode like RTTY but with forward error correction (SITOR-B). Broadcasts are scheduled by station, so receivers only print relevant messages. One of the few HF digital modes mandated by international maritime law.
+      </div>
+    </div>
+  </div>
+  <div class="down-hint">&darr; SNR comparison</div>
+</section>
+<section class="snr-slide">
+  <h2>NAVTEX &mdash; Signal vs Noise</h2>
+  <img src="assets/snr/navtex.png" alt="NAVTEX SNR comparison">
+  <p class="dim">FEC allows decoding at much lower SNR than raw RTTY</p>
+</section>
+</section>
+
+<!-- ============================================ -->
+<!-- WSPR (canvas) -->
 <!-- ============================================ -->
 <section>
   <h2>WSPR</h2>
@@ -547,7 +816,7 @@
 </section>
 
 <!-- ============================================ -->
-<!-- VARA -->
+<!-- VARA (canvas) -->
 <!-- ============================================ -->
 <section>
   <h2>VARA</h2>
@@ -573,7 +842,7 @@
 </section>
 
 <!-- ============================================ -->
-<!-- Rattlegram -->
+<!-- Rattlegram (canvas) -->
 <!-- ============================================ -->
 <section>
   <h2>Rattlegram</h2>
@@ -599,6 +868,40 @@
 </section>
 
 <!-- ============================================ -->
+<!-- Analog Modes (NEW — real data) -->
+<!-- ============================================ -->
+<section>
+  <h2>Analog Voice &amp; Fax</h2>
+  <h3>What non-digital signals look like on the waterfall</h3>
+  <div style="display:flex; gap:1.2em; justify-content:center; margin-top:0.5em;">
+    <div style="text-align:center;">
+      <img src="assets/waterfalls/usb.png" alt="USB" style="width:170px; border-radius:6px;">
+      <div class="dim" style="margin-top:4px;"><strong>USB</strong> &mdash; Voice</div>
+      <div class="dim">Broad, irregular energy</div>
+      <audio controls preload="none" style="width:160px; height:28px; margin-top:4px; filter:invert(1) hue-rotate(180deg); opacity:0.8;"><source src="assets/audio/usb.wav" type="audio/wav"></audio>
+    </div>
+    <div style="text-align:center;">
+      <img src="assets/waterfalls/lsb.png" alt="LSB" style="width:170px; border-radius:6px;">
+      <div class="dim" style="margin-top:4px;"><strong>LSB</strong> &mdash; Voice</div>
+      <div class="dim">Mirror image of USB</div>
+      <audio controls preload="none" style="width:160px; height:28px; margin-top:4px; filter:invert(1) hue-rotate(180deg); opacity:0.8;"><source src="assets/audio/lsb.wav" type="audio/wav"></audio>
+    </div>
+    <div style="text-align:center;">
+      <img src="assets/waterfalls/am.png" alt="AM" style="width:170px; border-radius:6px;">
+      <div class="dim" style="margin-top:4px;"><strong>AM</strong> &mdash; Broadcast</div>
+      <div class="dim">Carrier + symmetric sidebands</div>
+      <audio controls preload="none" style="width:160px; height:28px; margin-top:4px; filter:invert(1) hue-rotate(180deg); opacity:0.8;"><source src="assets/audio/am.wav" type="audio/wav"></audio>
+    </div>
+    <div style="text-align:center;">
+      <img src="assets/waterfalls/fax.png" alt="Fax" style="width:170px; border-radius:6px;">
+      <div class="dim" style="margin-top:4px;"><strong>Fax</strong> &mdash; Weather charts</div>
+      <div class="dim">Repeating scan-line pattern</div>
+      <audio controls preload="none" style="width:160px; height:28px; margin-top:4px; filter:invert(1) hue-rotate(180deg); opacity:0.8;"><source src="assets/audio/fax.wav" type="audio/wav"></audio>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================ -->
 <!-- CHOOSING A MODE -->
 <!-- ============================================ -->
 <section>
@@ -612,11 +915,12 @@
       <tr><td>Have a real conversation via weak signals</td><td><strong>JS8Call</strong></td></tr>
       <tr><td>Chat keyboard-to-keyboard</td><td><strong>PSK31</strong> or <strong>CW</strong></td></tr>
       <tr><td>Contest and make lots of contacts fast</td><td><strong>FT4</strong>, <strong>RTTY</strong>, or <strong>CW</strong></td></tr>
-      <tr><td>Get through when the band is terrible</td><td><strong>Olivia</strong> or <strong>JS8Call</strong></td></tr>
+      <tr><td>Get through when the band is terrible</td><td><strong>Olivia</strong>, <strong>MT63</strong>, or <strong>JS8Call</strong></td></tr>
       <tr><td>Send email over HF radio</td><td><strong>VARA</strong> + Winlink</td></tr>
       <tr><td>Monitor propagation</td><td><strong>WSPR</strong></td></tr>
       <tr><td>Send a quick text on FM</td><td><strong>Rattlegram</strong></td></tr>
       <tr><td>Use minimal equipment</td><td><strong>CW</strong></td></tr>
+      <tr><td>Fast keyboard chat with drift tolerance</td><td><strong>DominoEX</strong></td></tr>
     </tbody>
   </table>
 </section>
@@ -634,10 +938,33 @@
     <div><span style="color:#5bf;">PSK63</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="background:#5bf;color:#000;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> 125 Hz</div>
     <div><span style="color:#5bf;">FT4</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="background:#5bf;color:#000;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> 80 Hz</div>
     <div><span style="color:#5bf;">CW</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="background:#5bf;color:#000;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> ~100 Hz</div>
-    <div><span style="color:#5bf;">Olivia</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="background:#5bf;color:#000;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> 125-2000 Hz</div>
+    <div><span style="color:#5bf;">DominoEX</span>&nbsp;&nbsp;&nbsp;<span style="background:#5bf;color:#000;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> ~200 Hz</div>
     <div><span style="color:#5bf;">RTTY</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="background:#5bf;color:#000;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> 250 Hz</div>
+    <div><span style="color:#5bf;">NAVTEX</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="background:#5bf;color:#000;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> ~340 Hz</div>
+    <div><span style="color:#5bf;">Olivia</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="background:#5bf;color:#000;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> 125-2000 Hz</div>
+    <div><span style="color:#5bf;">MT63</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="background:#5bf;color:#000;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> 500-2000 Hz</div>
     <div><span style="color:#5bf;">VARA HF</span>&nbsp;&nbsp;&nbsp;&nbsp;<span style="background:#5bf;color:#000;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> 500-2300 Hz</div>
     <div><span style="color:#5bf;">Rattlegram</span>&nbsp;<span style="background:#5bf;color:#000;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span> ~1600 Hz</div>
+  </div>
+</section>
+
+<!-- ============================================ -->
+<!-- DATA SOURCE -->
+<!-- ============================================ -->
+<section>
+  <h2>Signal Data Source</h2>
+  <p style="font-size:0.7em; text-align:left; max-width:700px; margin:0 auto; line-height:1.6;">
+    Waterfall diagrams, audio samples, and SNR comparisons are generated from the
+    <strong>Panoradio HF Radio Signal Classification Dataset</strong> by Stefan Scholl (2019).
+  </p>
+  <div style="font-size:0.6em; text-align:left; max-width:700px; margin:1em auto; line-height:1.6; background:rgba(255,255,255,0.04); padding:1em; border-radius:8px;">
+    <div><strong>172,800</strong> IQ signal vectors &bull; <strong>18</strong> radio modes &bull; <strong>8</strong> SNR levels (-10 to +25 dB)</div>
+    <div style="margin-top:0.5em;"><strong>Sample rate:</strong> 6,000 Hz &bull; <strong>Duration:</strong> ~341 ms per sample</div>
+    <div style="margin-top:0.5em;"><strong>Channel model:</strong> CCIR 520 fading &bull; <strong>Frequency offset:</strong> &plusmn;250 Hz</div>
+    <div style="margin-top:0.8em; color:#888;">
+      S. Scholl, "Classification of Radio Signals and HF Transmission Modes with Deep Learning"<br>
+      arXiv:1906.04459, June 2019
+    </div>
   </div>
 </section>
 
@@ -658,7 +985,7 @@ Reveal.initialize({
 });
 </script>
 <script>
-// ── Waterfall renderer ──────────────────────────────────────────────
+// ── Waterfall renderer (for modes without real dataset data) ──────
 (function() {
   function heatColor(v) {
     v = Math.max(0, Math.min(1, v));
@@ -725,76 +1052,6 @@ Reveal.initialize({
     d[i+2] = Math.min(255, Math.max(d[i+2], col[2]));
   }
 
-  function drawSignalLine(d, W, H, x, yStart, yEnd, width, intensity, jitter) {
-    jitter = jitter || 0;
-    for (var y = yStart; y < Math.min(yEnd, H); y++) {
-      var dx = jitter ? (gaussNoise() * jitter) : 0;
-      for (var w = -width; w <= width; w++) {
-        var falloff = 1 - Math.abs(w) / (width + 1);
-        var v = intensity * falloff * (0.85 + Math.random() * 0.15);
-        setPixel(d, W, Math.round(x + dx + w), y, v);
-      }
-    }
-  }
-
-  // ── CW ──
-  renderWaterfall('wf-cw', function(d, W, H) {
-    var cx = W / 2;
-    var pattern = [
-      3,0,1,0,3,0,1,0, 0,0,0,
-      3,0,3,0,1,0,3,0, 0,0,0,
-      0,0,0,0,0,
-      3,0,1,0,1,0, 0,0,0,
-      1,0, 0,0,0,
-      0,0,0,0,0,
-      1,0,3,0,3,0, 0,0,0,
-      1,0,3,0,3,0,3,0,3,0, 0,0,0,
-      1,0,3,0, 0,0,0,
-      1,0,3,0,3,0
-    ];
-    var y = 15, unit = 3;
-    for (var rep = 0; rep < 3 && y < H - 20; rep++) {
-      for (var i = 0; i < pattern.length && y < H - 20; i++) {
-        if (pattern[i] > 0) {
-          var len = pattern[i] * unit;
-          drawSignalLine(d, W, H, cx, y, y + len, 2, 0.85 - rep * 0.1, 0.3);
-          y += len;
-        } else { y += unit; }
-      }
-      y += 12;
-    }
-  });
-
-  // ── RTTY ──
-  renderWaterfall('wf-rtty', function(d, W, H) {
-    var mark = W/2 + 14, space = W/2 - 14;
-    var y = 10;
-    while (y < H - 15) {
-      var onMark = Math.random() > 0.5;
-      var len = 4 + Math.floor(Math.random() * 8);
-      for (var row = y; row < Math.min(y + len, H - 15); row++) {
-        drawSignalLine(d, W, H, mark,  row, row+1, 2, onMark ? 0.8 : 0.25, 0.2);
-        drawSignalLine(d, W, H, space, row, row+1, 2, onMark ? 0.25 : 0.8, 0.2);
-      }
-      y += len;
-    }
-  });
-
-  // ── PSK31 ──
-  renderWaterfall('wf-psk31', function(d, W, H) {
-    var cx = W / 2;
-    for (var y = 8; y < H - 15; y++) {
-      var active = (y % 80) < 60;
-      var intensity = active ? (0.6 + Math.random() * 0.3) : (0.15 + Math.random() * 0.1);
-      drawSignalLine(d, W, H, cx, y, y+1, active ? 1 : 0, intensity, 0.15);
-    }
-    var cx2 = cx + 22;
-    for (var y = 30; y < H - 50; y++) {
-      var active = (y % 90) < 50;
-      drawSignalLine(d, W, H, cx2, y, y+1, 0, active ? (0.45 + Math.random()*0.2) : 0.1, 0.15);
-    }
-  });
-
   // ── FT8 ──
   renderWaterfall('wf-ft8', function(d, W, H) {
     var blockH = 46, gapH = 8, nBlocks = 5;
@@ -829,7 +1086,6 @@ Reveal.initialize({
 
   // ── FT4 ──
   renderWaterfall('wf-ft4', function(d, W, H) {
-    // FT4: like FT8 but shorter blocks (7.5s vs 15s) and slightly wider traces
     var blockH = 24, gapH = 6, nBlocks = 8;
     var stations = [];
     for (var s = 0; s < 10; s++) {
@@ -888,24 +1144,6 @@ Reveal.initialize({
     }
   });
 
-  // ── Olivia ──
-  renderWaterfall('wf-olivia', function(d, W, H) {
-    var cx = W/2, bw = 40, nTones = 8;
-    for (var y = 10; y < H - 15; y++) {
-      var symbolIdx = Math.floor(y / 12);
-      var tone1 = ((symbolIdx * 7 + 3) % nTones);
-      var tone2 = ((symbolIdx * 11 + 5) % nTones);
-      for (var t = 0; t < nTones; t++) {
-        var tx = cx - bw/2 + (t+0.5) * (bw/nTones);
-        var isActive = (t === tone1 || t === tone2);
-        var v = isActive ? (0.55 + Math.random()*0.3) : (0.08 + Math.random()*0.05);
-        setPixel(d, W, Math.round(tx-1), y, v*0.6);
-        setPixel(d, W, Math.round(tx),   y, v);
-        setPixel(d, W, Math.round(tx+1), y, v*0.6);
-      }
-    }
-  });
-
   // ── WSPR ──
   renderWaterfall('wf-wspr', function(d, W, H) {
     var signals = [
@@ -931,8 +1169,6 @@ Reveal.initialize({
 
   // ── VARA ──
   renderWaterfall('wf-vara', function(d, W, H) {
-    // VARA: wide adaptive OFDM band that changes intensity as it adapts.
-    // Looks like a solid band ~500-2300 Hz wide with internal structure.
     var cx = W / 2;
     var sessions = [
       { yStart: 15, yEnd: 100, bw: 35, intensity: 0.65 },
@@ -941,14 +1177,11 @@ Reveal.initialize({
     ];
     for (var sess = 0; sess < sessions.length; sess++) {
       var s = sessions[sess];
-      var x0 = cx - s.bw/2;
       for (var y = s.yStart; y < Math.min(s.yEnd, H-15); y++) {
-        // Bandwidth adapts over time
         var progress = (y - s.yStart) / (s.yEnd - s.yStart);
         var curBw = s.bw * (0.7 + 0.3 * Math.sin(progress * Math.PI * 3));
         var curX0 = cx - curBw/2;
         for (var x = Math.round(curX0); x < Math.round(curX0 + curBw); x++) {
-          // Internal subcarrier structure
           var edge = Math.min(x - curX0, curX0 + curBw - x) / 4;
           var edgeFade = Math.min(1, edge);
           var v = s.intensity * edgeFade * (0.4 + Math.random() * 0.5);

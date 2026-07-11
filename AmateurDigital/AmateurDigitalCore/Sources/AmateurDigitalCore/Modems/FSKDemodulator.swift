@@ -195,6 +195,15 @@ public final class FSKDemodulator {
     /// Whether polarity is inverted (swaps mark/space interpretation)
     public var polarityInverted: Bool = false
 
+    // MARK: - Polarity Auto-Detection
+    /// Counts Baudot codes received (for polarity detection window)
+    private var polarityCodesReceived: Int = 0
+    /// Counts NUL codes (0x00) — high rate indicates inverted polarity
+    /// because LTRS shifts (0x1F=11111) become NUL (0x00=00000) when bits are flipped
+    private var polarityNullCount: Int = 0
+    /// Set once polarity is confirmed or flipped (prevents re-detection)
+    private var polarityLocked: Bool = false
+
     /// Effective squelch level (uses manual if set, otherwise adaptive)
     private var effectiveSquelchLevel: Float {
         squelchLevel > 0 ? squelchLevel : adaptiveSquelchLevel
@@ -223,7 +232,8 @@ public final class FSKDemodulator {
 
     // MARK: - Confidence Tracking
 
-    /// Minimum confidence threshold for character output
+    /// Minimum confidence threshold for character output.
+    /// Filters out low-confidence characters from noise without affecting real signals.
     public var minCharacterConfidence: Float = 0.0
 
     /// Last character's confidence level
@@ -840,6 +850,26 @@ public final class FSKDemodulator {
 
         switch state {
         case .waitingForStart:
+            // Polarity auto-detection during preamble.
+            // Normal RTTY idle = mark = positive correlation.
+            // With wrong sideband, idle = negative correlation.
+            // Check first 8 state steps (~40ms): if mostly negative → flip polarity.
+            if !polarityLocked {
+                polarityCodesReceived += 1
+                if correlation < 0 { polarityNullCount += 1 }
+
+                if polarityCodesReceived >= 8 {
+                    if polarityNullCount >= 6 {
+                        // Idle is consistently negative → inverted polarity
+                        polarityInverted.toggle()
+                    }
+                    polarityLocked = true
+                    polarityCodesReceived = 0
+                    polarityNullCount = 0
+                }
+                break  // Don't process state machine during detection window
+            }
+
             // Looking for transition from mark to space (start of start bit)
             if correlation < -correlationThreshold {
                 // Detected space - could be start bit
@@ -1000,6 +1030,11 @@ public final class FSKDemodulator {
         markEnvelope = 0
         spaceEnvelope = 0
         atcNoiseFloor = 0.001
+
+        // Reset polarity auto-detection
+        polarityCodesReceived = 0
+        polarityNullCount = 0
+        polarityLocked = false
 
         // Reset AFC state
         frequencyCorrection = 0

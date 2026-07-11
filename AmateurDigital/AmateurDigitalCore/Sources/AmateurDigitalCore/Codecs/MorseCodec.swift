@@ -108,6 +108,38 @@ public struct MorseCodec {
         ("SOS", [.dit, .dit, .dit, .dah, .dah, .dah, .dit, .dit, .dit]),
     ]
 
+    // MARK: - Prosign Decoding
+
+    /// Sentinel characters (Unicode private use area) for prosigns whose
+    /// patterns have no character equivalent. Without these, SK / CT / SOS
+    /// decoded to nil and vanished from the copy — the end-of-contact
+    /// prosign disappearing from a QSO transcript. Decoders expand the
+    /// sentinels to readable text via `prosignText(for:)` before emitting.
+    /// (AR, AS, BT, KN already surface as + & = ( by ITU pattern identity.)
+    public static let prosignSK: Character = "\u{E001}"
+    public static let prosignCT: Character = "\u{E002}"
+    public static let prosignSOS: Character = "\u{E003}"
+    public static let prosignSN: Character = "\u{E004}"
+
+    private static let prosignExpansions: [Character: String] = [
+        prosignSK: "<SK>",
+        prosignCT: "<CT>",
+        prosignSOS: "<SOS>",
+        prosignSN: "<SN>",
+    ]
+
+    private static let prosignLeaves: [(Character, [MorseElement])] = [
+        (prosignSK, [.dit, .dit, .dit, .dah, .dit, .dah]),
+        (prosignCT, [.dah, .dit, .dah, .dit, .dah]),
+        (prosignSOS, [.dit, .dit, .dit, .dah, .dah, .dah, .dit, .dit, .dit]),
+        (prosignSN, [.dit, .dit, .dit, .dah, .dit]),
+    ]
+
+    /// Readable expansion for a prosign sentinel, or nil for ordinary characters.
+    public static func prosignText(for character: Character) -> String? {
+        prosignExpansions[character]
+    }
+
     // MARK: - Binary Tree for Decoding
 
     /// Node in the Morse binary tree
@@ -138,8 +170,37 @@ public struct MorseCodec {
             }
             node.character = char
         }
+        // Prosign sentinels occupy leaves the character table leaves empty;
+        // never clobber an existing character mapping.
+        for (char, elements) in prosignLeaves {
+            var node = root
+            for element in elements {
+                switch element {
+                case .dit:
+                    if node.dit == nil { node.dit = TreeNode() }
+                    node = node.dit!
+                case .dah:
+                    if node.dah == nil { node.dah = TreeNode() }
+                    node = node.dah!
+                }
+            }
+            if node.character == nil { node.character = char }
+        }
         return root
     }()
+
+    /// Whether the element sequence can still extend to a valid character
+    /// (i.e. is a node in the decode tree). Lets a beam search prune
+    /// impossible dit/dah readings as they build.
+    public static func isValidPrefix(_ elements: [MorseElement]) -> Bool {
+        var node = decodeTree
+        for element in elements {
+            let next = element == .dit ? node.dit : node.dah
+            guard let n = next else { return false }
+            node = n
+        }
+        return true
+    }
 
     /// Character to elements lookup dictionary
     private static let encodeDict: [Character: [MorseElement]] = {

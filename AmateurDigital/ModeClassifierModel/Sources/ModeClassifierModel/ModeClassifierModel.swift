@@ -15,9 +15,9 @@ public struct ModeClassification {
 
 /// CoreML-based digital mode classifier.
 ///
-/// Uses a Gradient Boosted Machine (200 trees) trained on 11 spectral features
-/// extracted by SpectralAnalyzer. Achieves 99.8% accuracy on synthetic test data.
-/// The model is 372KB and runs in <1ms on CPU.
+/// Uses a Gradient Boosted Machine (200 trees) trained on 15 spectral features
+/// extracted by SpectralAnalyzer, including Costas array detection for FT8/JS8Call.
+/// The model runs in <1ms on CPU.
 ///
 /// ```swift
 /// let classifier = try ModeClassifierML()
@@ -27,16 +27,17 @@ public struct ModeClassification {
 public final class ModeClassifierML: @unchecked Sendable {
     private let model: MLModel
 
-    /// The 11 feature names expected by the model, in order.
+    /// The 15 feature names expected by the model, in order.
     public static let featureNames = [
         "bandwidth", "flatness", "num_peaks", "top_peak_power", "top_peak_bw",
         "fsk_pairs", "fsk_valley_pairs", "envelope_cv", "duty_cycle",
-        "transition_rate", "has_ook"
+        "transition_rate", "has_ook", "baud_rate", "baud_confidence",
+        "costas_score", "costas_mode"
     ]
 
     /// Mode labels corresponding to the model's class indices.
     public static let modeLabels = [
-        "rtty", "psk31", "bpsk63", "qpsk31", "qpsk63", "cw", "js8call", "noise"
+        "bpsk63", "cw", "ft8", "js8call", "noise", "psk31", "qpsk31", "qpsk63", "rtty"
     ]
 
     /// Initialize the classifier, loading the bundled CoreML model.
@@ -58,7 +59,8 @@ public final class ModeClassifierML: @unchecked Sendable {
     ///
     /// - Parameter features: Dictionary mapping feature names to Double values.
     ///   Required keys: bandwidth, flatness, num_peaks, top_peak_power, top_peak_bw,
-    ///   fsk_pairs, fsk_valley_pairs, envelope_cv, duty_cycle, transition_rate, has_ook
+    ///   fsk_pairs, fsk_valley_pairs, envelope_cv, duty_cycle, transition_rate, has_ook,
+    ///   baud_rate, baud_confidence, costas_score, costas_mode
     /// - Returns: Classification result with mode, confidence, and all probabilities.
     public func classify(features: [String: Double]) -> ModeClassification {
         let provider = DictionaryFeatureProvider(features: features)
@@ -68,7 +70,7 @@ public final class ModeClassifierML: @unchecked Sendable {
         }
 
         // Extract predicted class index
-        let modeIndex = prediction.featureValue(for: "mode_index")?.int64Value ?? 7
+        let modeIndex = prediction.featureValue(for: "mode")?.int64Value ?? 4
 
         let mode: String
         if modeIndex >= 0 && modeIndex < Self.modeLabels.count {

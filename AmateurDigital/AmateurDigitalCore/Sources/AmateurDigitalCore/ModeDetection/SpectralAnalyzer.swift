@@ -51,6 +51,13 @@ public struct SpectralFeatures {
 
     /// Confidence of the baud rate estimate (0.0–1.0)
     public let baudRateConfidence: Float
+
+    /// Costas array correlation score (0.0 = no match, higher = stronger match).
+    /// Detects FT8 and JS8Call 7-symbol Costas sync patterns in the spectrogram.
+    public let costasScore: Float
+
+    /// Which Costas pattern matched: "ft8", "js8call", or "none".
+    public let costasMode: String
 }
 
 /// A detected spectral peak.
@@ -148,6 +155,7 @@ public struct SpectralAnalyzer {
         let flatness = computeSpectralFlatness(bins: bins, binWidth: binWidth, center: center, bandwidth: bandwidth)
         let envelopeStats = analyzeEnvelope(samples)
         let (baudRate, baudConf) = estimateBaudRate(samples)
+        let (costasScore, costasMode) = detectCostasSync(samples)
 
         return SpectralFeatures(
             powerBins: bins,
@@ -162,7 +170,9 @@ public struct SpectralAnalyzer {
             fskPairs: fskPairs,
             envelopeStats: envelopeStats,
             estimatedBaudRate: baudRate,
-            baudRateConfidence: baudConf
+            baudRateConfidence: baudConf,
+            costasScore: costasScore,
+            costasMode: costasMode
         )
     }
 
@@ -629,5 +639,126 @@ public struct SpectralAnalyzer {
             transitionRate: transitionRate,
             hasOnOffKeying: hasOOK
         )
+    }
+
+    // MARK: - Costas Array Correlation
+
+    /// Known Costas sync arrays for 8-GFSK modes.
+    private static let ft8Costas: [Int] = [3, 1, 4, 0, 6, 5, 2]
+    private static let js8Costas: [Int] = [4, 2, 5, 6, 1, 3, 0]
+
+    /// Detect FT8 or JS8Call Costas sync patterns in the audio.
+    ///
+    /// Uses Goertzel filters at 8 tone frequencies to build a lightweight spectrogram,
+    /// then correlates against known 7-symbol Costas arrays at multiple carrier
+    /// frequencies and time offsets.
+    ///
+    /// - Parameter samples: Audio samples at `sampleRate` (48 kHz expected).
+    /// - Returns: (score, mode) where score is the best correlation metric and
+    ///   mode is "ft8", "js8call", or "none".
+    private func detectCostasSync(_ samples: [Float]) -> (Float, String) {
+        // Fast Costas detection: only search at peak frequencies found by FFT,
+        // not the entire spectrum. This reduces carrier search from ~1400 bins to ~10.
+        let toneSpacing = 6.25
+        let internalRate = 12000.0
+        let decimationFactor = Int(sampleRate / internalRate) // 4
+        let samplesPerSymbol = 1920 // at 12 kHz
+        let quarterSymbol = samplesPerSymbol / 4
+
+        // Need at least 7 symbols at 48 kHz
+        guard samples.count >= 7 * 7680 else { return (0, "none") }
+
+        // Decimate 48 kHz → 12 kHz
+        let decimatedCount = samples.count / decimationFactor
+        guard decimatedCount > samplesPerSymbol * 7 else { return (0, "none") }
+
+        var decimated = [Float](repeating: 0, count: decimatedCount)
+        for i in 0..<decimatedCount {
+            let base = i * decimationFactor
+            var sum: Float = 0
+            for j in 0..<decimationFactor { sum += samples[base + j] }
+            decimated[i] = sum / Float(decimationFactor)
+        }
+
+        let nhsym = decimatedCount / quarterSymbol - 3
+        guard nhsym > 0 else { return (0, "none") }
+
+        // Use FFT peaks as candidate carrier frequencies (fast — only ~5-10 candidates)
+        // instead of searching the entire spectrum (slow — ~1400 candidates)
+        let peakFreqs: [Double] = {
+            // Quick power spectrum to find candidate frequencies
+            let fftN = FFTProcessor.nextPow2(min(decimatedCount, 8192))
+            var re = [Double](repeating: 0, count: fftN)
+            var im = [Double](repeating: 0, count: fftN)
+            for i in 0..<min(decimatedCount, fftN) { re[i] = Double(decimated[i]) }
+            FFTProcessor.fft(&re, &im)
+
+            let halfN = fftN / 2
+            let binWidth = internalRate / Double(fftN)
+            var peaks: [(freq: Double, power: Double)] = []
+            for bin in 2..<halfN {
+                let p = re[bin] * re[bin] + im[bin] * im[bin]
+                let freq = Double(bin) * binWidth
+                if freq > 200 && freq < 4000 { peaks.append((freq, p)) }
+            }
+            peaks.sort { $0.power > $1.power }
+            // Take top 10 peaks as carrier candidates (± tone spacing for offset)
+            return Array(peaks.prefix(10).map { $0.freq })
+        }()
+
+        guard !peakFreqs.isEmpty else { return (0, "none") }
+
+        var bestScore: Float = 0
+        var bestMode = "none"
+        let twopi = 2.0 * Double.pi
+        let nssy = 4
+
+        for peakFreq in peakFreqs {
+            // Search a small range around each peak (carrier could be any of 8 tones)
+            for toneOffset in 0..<8 {
+                let carrierFreq = peakFreq - Double(toneOffset) * toneSpacing
+                guard carrierFreq > 100 && carrierFreq + 8 * toneSpacing < internalRate / 2 else { continue }
+
+                // Compute Goertzel power at 8 tones for each quarter-symbol time step
+                var tonePower = [[Float]](repeating: [Float](repeating: 0, count: 8), count: nhsym)
+
+                for tone in 0..<8 {
+                    let freq = carrierFreq + Double(tone) * toneSpacing
+                    let k = freq * Double(samplesPerSymbol) / internalRate
+                    let coeff = Float(2.0 * cos(twopi * k / Double(samplesPerSymbol)))
+                    for j in 0..<nhsym {
+                        let start = j * quarterSymbol
+                        guard start + samplesPerSymbol <= decimatedCount else { break }
+                        var s0: Float = 0, s1: Float = 0, s2: Float = 0
+                        for i in 0..<samplesPerSymbol {
+                            s0 = decimated[start + i] + coeff * s1 - s2
+                            s2 = s1; s1 = s0
+                        }
+                        tonePower[j][tone] = s1 * s1 + s2 * s2 - coeff * s1 * s2
+                    }
+                }
+
+                // Correlate against Costas patterns at a few time offsets
+                for jOff in stride(from: -4, through: 4, by: 2) {
+                    for (pattern, modeName) in [(Self.ft8Costas, "ft8"), (Self.js8Costas, "js8call")] {
+                        var syncPower: Float = 0, bgPower: Float = 0, valid = 0
+                        for n in 0..<7 {
+                            let k = jOff + nssy * n
+                            guard k >= 0 && k < nhsym else { continue }
+                            valid += 1
+                            syncPower += tonePower[k][pattern[n]]
+                            for t in 0..<8 where t != pattern[n] { bgPower += tonePower[k][t] }
+                        }
+                        guard valid >= 5 else { continue }
+                        let avgBg = bgPower / Float(valid * 7)
+                        let metric: Float = avgBg > 0 ? syncPower / (Float(valid) * avgBg) : 0
+                        if metric > bestScore { bestScore = metric; bestMode = modeName }
+                    }
+                }
+            }
+        }
+
+        let normalized = max(0.0, min(1.0, (bestScore - 1.0) / 6.0))
+        return bestScore < 1.5 ? (0, "none") : (normalized, bestMode)
     }
 }

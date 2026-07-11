@@ -445,6 +445,7 @@ struct BenchmarkSuite {
         runEquipmentImpairmentTests()
         runNarrowbandInterferenceTests()
         runWrongSidebandTest()
+        runMetamorphicTests()
         runFalsePositiveTests()
 
         printSummary()
@@ -1190,6 +1191,61 @@ struct BenchmarkSuite {
         print()
     }
 
+    // MARK: - Metamorphic Tests (decoder invariance properties)
+
+    mutating func runMetamorphicTests() {
+        print("--- Metamorphic Tests (invariance properties) ---")
+        let text = "CQ CQ CQ DE W1AW K"
+
+        // Amplitude scaling: decoder should produce same output at different levels.
+        // Tests AGC and threshold adaptation across wide dynamic range.
+        for (name, scale) in [("amp_0.1x", Float(0.1)), ("amp_0.5x", Float(0.5)),
+                               ("amp_2x", Float(2.0)), ("amp_5x", Float(5.0))] {
+            let r = runTest(
+                category: "metamorphic", name: name, config: .standard, text: text,
+                impairment: { $0.map { $0 * scale } }
+            )
+            results.append(r); printResult(r)
+        }
+
+        // Time shift: prepending silence should not affect decoding.
+        // Tests that the decoder correctly finds the signal regardless of start offset.
+        for (name, ms) in [("delay_100ms", 100), ("delay_500ms", 500), ("delay_1000ms", 1000)] {
+            let delaySamples = 48000 * ms / 1000
+            let r = runTest(
+                category: "metamorphic", name: name, config: .standard, text: text,
+                impairment: { signal in
+                    [Float](repeating: 0, count: delaySamples) + signal
+                }
+            )
+            results.append(r); printResult(r)
+        }
+
+        // Determinism: decoding same signal twice should produce identical output.
+        let modem = RTTYModem(configuration: .standard)
+        let samples = modem.encodeWithIdle(text: text, preambleMs: 200, postambleMs: 200)
+        let demod1 = FSKDemodulator(configuration: .standard)
+        delegate.reset()
+        demod1.delegate = delegate
+        demod1.process(samples: samples)
+        let decoded1 = delegate.decodedText
+
+        let demod2 = FSKDemodulator(configuration: .standard)
+        delegate.reset()
+        demod2.delegate = delegate
+        demod2.process(samples: samples)
+        let decoded2 = delegate.decodedText
+
+        let detScore: Double = decoded1 == decoded2 ? 100.0 : 0.0
+        let r = TestResult(category: "metamorphic", name: "determinism",
+                           expected: text, decoded: decoded1 == decoded2 ? decoded1 : "\(decoded1) vs \(decoded2)",
+                           cer: decoded1 == decoded2 ? characterErrorRate(expected: text, actual: decoded1) : 1.0,
+                           score: detScore)
+        results.append(r); printResult(r)
+
+        print()
+    }
+
     // MARK: - False Positive
 
     mutating func runFalsePositiveTests() {
@@ -1309,6 +1365,7 @@ struct BenchmarkSuite {
             "narrowband_qrm":   2.0,   // Carrier within RTTY passband
             "wrong_sideband":   1.0,   // Operator LSB/USB error
             "equipment":        1.5,   // Sound card issues, ground loops
+            "metamorphic":      1.5,   // Invariance: amplitude, time shift, determinism
             "false_positive":   1.5,
         ]
 

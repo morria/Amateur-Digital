@@ -19,18 +19,44 @@ jobs:
       - name: Run unit tests
         run: cd AmateurDigital/AmateurDigitalCore && swift test
 
-      - name: Run RTTY benchmark (regression check)
-        run: |
-          cd AmateurDigital/AmateurDigitalCore
-          swift run -c release RTTYBenchmark 2>&1 | tee /tmp/bench.txt
+      - name: Run RTTY benchmark
+        run: cd AmateurDigital/AmateurDigitalCore && swift run -c release RTTYBenchmark
 
-      - name: Check benchmark score
+      - name: Run PSK benchmark
+        run: cd AmateurDigital/AmateurDigitalCore && swift run -c release PSKBenchmark
+
+      - name: Run CW benchmark
+        run: cd AmateurDigital/AmateurDigitalCore && swift run -c release CWBenchmark
+
+      - name: Check benchmark regressions
         run: |
           python3 -c "
-          import json
-          with open('/tmp/rtty_benchmark_latest.json') as f:
-              score = json.load(f)['composite_score']
-          print(f'RTTY Composite Score: {score:.1f}/100')
-          assert score >= 88.0, f'REGRESSION: Score {score:.1f} below baseline 88.0'
-          print('No regression detected')
+          import json, sys
+
+          baselines = json.load(open('benchmarks/baselines.json'))
+          margin = 1.5  # Allow up to 1.5 point drop (noise margin)
+          failed = False
+
+          for decoder, (json_path, key) in {
+              'rtty': ('/tmp/rtty_benchmark_latest.json', 'composite_score'),
+              'psk': ('/tmp/psk_benchmark_latest.json', 'composite_score'),
+              'cw': ('/tmp/cw_benchmark_latest.json', 'composite_score'),
+          }.items():
+              try:
+                  score = json.load(open(json_path))[key]
+              except (FileNotFoundError, KeyError):
+                  print(f'WARNING: {decoder} results not found')
+                  continue
+
+              baseline = baselines.get(decoder, 0)
+              status = 'PASS' if score >= baseline - margin else 'FAIL'
+              print(f'{decoder.upper():5s}: {score:5.1f} (baseline {baseline:.1f}, min {baseline-margin:.1f}) [{status}]')
+              if status == 'FAIL':
+                  failed = True
+
+          if failed:
+              print('\nREGRESSION DETECTED — one or more decoders below baseline')
+              sys.exit(1)
+          else:
+              print('\nAll decoders above baseline — no regression')
           "

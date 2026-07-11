@@ -338,6 +338,123 @@ This phase handles the 80% case — clearly distinguishable signals at moderate 
 - [ ] Export to CoreML, integrate as optional Tier 5
 - [ ] Evaluate whether it can replace Tiers 1-2 or serves as a complement
 
+## Panoradio HF Dataset
+
+The `panoradio/` directory contains the Panoradio HF radio signal classification dataset (Scholl, 2019) — a professionally-designed, balanced corpus of synthetic HF radio signals for training and evaluating mode classifiers.
+
+### Dataset Overview
+
+| Property | Value |
+|----------|-------|
+| **Signals** | 172,800 IQ vectors |
+| **Duration** | 2,048 complex samples each = 341 ms at 6 kHz |
+| **Sample rate** | 6,000 Hz (baseband) |
+| **Format** | NumPy `.npy` (complex128), 5.3 GB |
+| **Modes** | 18 HF signal types (balanced: 9,600 per mode) |
+| **SNR levels** | 8 levels: -10, -5, 0, +5, +10, +15, +20, +25 dB (1,200 per mode per SNR) |
+| **Channel model** | CCIR 520 Watterson fading (6 scenarios), AWGN, ±250 Hz freq offset, random phase |
+| **Power** | Normalized to 1.0 |
+
+### Files
+
+```
+panoradio/
+├── dataset_hf_radio.npy              # 172,800 × 2,048 complex128 IQ signals (5.3 GB)
+├── dataset_panoradio_hf_tags.csv     # Labels: idx, mode, snr (172,800 rows)
+└── dataset_panoradio_hf_readme.txt   # Dataset documentation
+```
+
+### Signal Classes (18 modes)
+
+| Mode | Label in CSV | Modulation | Baud Rate | Our Decoder |
+|------|-------------|------------|-----------|-------------|
+| Morse Code | `morse` | OOK | variable | **CW** (direct match) |
+| PSK31 | `psk31` | BPSK | 31.25 | **PSK31** (direct match) |
+| PSK63 | `psk63` | BPSK | 62.5 | **BPSK63** (direct match) |
+| QPSK31 | `qpsk31` | QPSK | 31.25 | **QPSK31** (direct match) |
+| RTTY 45/170 | `rtty45_170` | FSK, 170 Hz shift | 45.45 | **RTTY** (direct match, default config) |
+| RTTY 50/170 | `rtty50_170` | FSK, 170 Hz shift | 50 | **RTTY** (supported baud rate) |
+| RTTY 100/850 | `rtty100_850` | FSK, 850 Hz shift | 100 | Not supported (different shift) |
+| Olivia 8/250 | `olivia8_250` | 8-MFSK | 31 | Planned |
+| Olivia 16/500 | `olivia16_500` | 16-MFSK | 31 | Planned |
+| Olivia 16/1000 | `olivia16_1000` | 16-MFSK | 62 | Planned |
+| Olivia 32/1000 | `olivia32_1000` | 32-MFSK | 31 | Planned |
+| DominoEx | `dominoex11` | 18-MFSK | 11 | No |
+| MT63/1000 | `mt63_1000` | multi-carrier | 10 | No |
+| Navtex | `navtex` | FSK, 170 Hz shift | 100 | No |
+| USB | `usb` | SSB | — | No |
+| LSB | `lsb` | SSB | — | No |
+| AM | `am` | AM | — | No |
+| Radiofax | `fax` | fax | — | No |
+
+### IQ-to-Audio Conversion
+
+The dataset contains baseband IQ samples (centered at 0 Hz). To feed into our 48 kHz real-audio decoders:
+
+```python
+# Upsample 6 kHz → 48 kHz, frequency-shift to tone center, extract real part
+import numpy as np
+from scipy.signal import resample_poly
+
+iq = dataset[idx]                              # 2048 complex samples at 6 kHz
+iq_48k = resample_poly(iq, 8, 1)              # 16384 samples at 48 kHz
+t = np.arange(len(iq_48k)) / 48000
+tone_hz = 700                                  # CW=700, PSK=1000, RTTY=2040
+audio = np.real(iq_48k * np.exp(2j * np.pi * tone_hz * t))
+audio_float32 = (audio / np.max(np.abs(audio)) * 0.9).astype(np.float32)
+```
+
+Tone center frequencies for our modes:
+- **CW**: 700 Hz
+- **PSK31/63, QPSK31**: 1000 Hz
+- **RTTY 45/170**: 2040 Hz (midpoint of mark 2125, space 1955)
+
+### Use Cases
+
+**1. Mode Classifier Training (Tier 5 / CoreML)**
+- Train a CNN or transformer on spectrograms from all 18 classes
+- 1,200 samples per mode per SNR = robust training data
+- Directly applicable to the Tier 5 EfficientNetB0 approach described above
+- Published ResNet baseline: 94.1% accuracy (98% at SNR ≥ +5 dB)
+
+**2. Mode Classifier Evaluation**
+- Test our existing SpectralAnalyzer + ModeClassifier against known labels
+- Measure accuracy vs SNR curves for each supported mode
+- Compare our feature-based Tier 2 against the published deep learning results
+- Identify SNR threshold where our classifier breaks down
+
+**3. False Positive Testing**
+- Feed non-supported modes (AM, LSB, Olivia, etc.) through our decoders
+- Verify decoders don't produce false positives on wrong-mode signals
+- Especially important: Navtex (FSK 100/170) should not decode as RTTY (FSK 45/170)
+
+**4. Decoder Robustness Evaluation**
+- No decoded-text ground truth (only mode labels), so can't measure CER
+- But CAN measure: signal detection rate, mode detection accuracy, false decode rate
+- Watterson fading channel matches our ITU benchmark conditions
+- SNR sweep (-10 to +25 dB) gives performance vs SNR curves
+
+### Published Results (Scholl 2019)
+
+Best model (41-layer ResNet, 1.4M params):
+
+| SNR | Accuracy |
+|-----|----------|
+| ≥ +5 dB | ~98% |
+| 0 dB | ~95% |
+| -5 dB | ~90% |
+| -10 dB | ~55-65% |
+
+Per-mode accuracy (averaged over all SNR): Morse 97%, PSK31 91%, PSK63 91%, QPSK31 86%, RTTY45 94%, RTTY50 92%, RTTY100 97%.
+
+Notable confusions: QPSK31 ↔ PSK31 (same baud, related modulation), RTTY45 ↔ RTTY50 (differ by 5 baud).
+
+### References
+
+- S. Scholl, "Classification of Radio Signals and HF Transmission Modes with Deep Learning", 2019. [arXiv:1906.04459](https://arxiv.org/abs/1906.04459)
+- S. Scholl (DC9ST), "Classification of shortwave radio signals with deep learning", Software Defined Radio Academy 2021
+- Dataset: [panoradio-sdr.de/radio-signal-classification-dataset](https://panoradio-sdr.de/radio-signal-classification-dataset/)
+
 ## References
 
 - [RSID Technical Description (W1HKJ)](http://www.w1hkj.com/RSID_description.html)

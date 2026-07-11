@@ -952,6 +952,28 @@ public struct ModeClassifier {
             ))
         }
 
+        // --- Costas sync array correlation ---
+        // The 7-symbol Costas pattern is a fingerprint unique to FT8/JS8Call.
+        // A strong JS8Call Costas match is definitive evidence.
+        if f.costasScore > 0.3 && f.costasMode == "js8call" {
+            let bonus = min(config.js8CostasBonus, f.costasScore * 0.5)
+            score += bonus
+            evidence.append(Evidence(
+                label: "JS8Call Costas sync detected",
+                impact: bonus,
+                detail: "Costas array [4,2,5,6,1,3,0] correlation score \(String(format: "%.2f", f.costasScore)) — fingerprint match for JS8Call"
+            ))
+        } else if f.costasScore > 0.3 && f.costasMode == "ft8" {
+            // FT8 Costas detected — slight evidence for JS8Call too (same physical layer)
+            let bonus = min(0.15, f.costasScore * 0.2)
+            score += bonus
+            evidence.append(Evidence(
+                label: "FT8 Costas sync detected (related mode)",
+                impact: bonus,
+                detail: "FT8 Costas array detected (score \(String(format: "%.2f", f.costasScore))) — same GFSK physical layer as JS8Call"
+            ))
+        }
+
         return buildScore(mode: .js8call, rawScore: score, evidence: evidence)
     }
 
@@ -967,6 +989,8 @@ public struct ModeClassifier {
         let js8Score = scoreJS8Call(f)
 
         var evidence = js8Score.evidence
+        var extraBoost: Float = 0.0
+
         // FT8 is ~100x more common than JS8Call on HF — slight prior boost
         let ft8Boost: Float = config.ft8PriorBoost
         evidence.append(Evidence(
@@ -974,8 +998,21 @@ public struct ModeClassifier {
             impact: ft8Boost,
             detail: "FT8 is the most common weak-signal mode on HF. Spectrally identical to JS8Call."
         ))
+        extraBoost += ft8Boost
 
-        let confidence = min(1.0, js8Score.confidence + ft8Boost)
+        // Costas array discrimination: FT8 uses [3,1,4,0,6,5,2], JS8Call uses [4,2,5,6,1,3,0].
+        // If the FT8 Costas pattern was detected, give an additional boost to FT8 over JS8Call.
+        if f.costasScore > 0.3 && f.costasMode == "ft8" {
+            let costasBoost = min(config.ft8CostasBonus, f.costasScore * 0.35)
+            extraBoost += costasBoost
+            evidence.append(Evidence(
+                label: "FT8 Costas sync fingerprint",
+                impact: costasBoost,
+                detail: "Costas array [3,1,4,0,6,5,2] detected (score \(String(format: "%.2f", f.costasScore))) — unique FT8 fingerprint"
+            ))
+        }
+
+        let confidence = min(1.0, js8Score.confidence + extraBoost)
 
         return ModeScore(
             mode: .ft8,

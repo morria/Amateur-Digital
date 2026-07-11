@@ -11,11 +11,7 @@
 //  TX: message string -> FT8Codec.pack77 -> CRC-14 append -> LDPC encode ->
 //      GFSKModulator -> audio samples
 //
-//  NOTE: FT8 uses an LDPC(174,91) code (77 msg + 14 CRC = 91 info bits).
-//  The current LDPC174_87 code has K=87 (designed for JS8Call). For full FT8
-//  support, the LDPC parity-check/generator tables need to be updated to
-//  the (174,91) variant from WSJT-X. The RX/TX wiring is structurally correct
-//  and will work once the proper FT8 LDPC tables are in place.
+//  Uses the LDPC(174,91) code from WSJT-X (77 msg + 14 CRC = 91 info bits).
 //
 
 import Foundation
@@ -184,17 +180,7 @@ public final class FT8Modem {
         }
 
         // Step 3: LDPC encode (91 info bits -> 174-bit codeword)
-        // NOTE: When LDPC174_87 is upgraded to (174,91) for FT8, pass all 91 bits.
-        // Currently using the first 87 bits; TX will produce a valid codeword
-        // for the (174,87) code but not the FT8-standard (174,91) code.
-        let infoBits: [UInt8]
-        if bits91.count <= 87 {
-            infoBits = bits91 + [UInt8](repeating: 0, count: 87 - bits91.count)
-        } else {
-            // Truncate to K=87 for current LDPC code; full FT8 needs K=91
-            infoBits = Array(bits91.prefix(87))
-        }
-        let codeword = LDPC174_87.encode(infoBits)
+        let codeword = LDPC174_91.encode(bits91)
 
         // Step 4: Map codeword to 79 channel symbols via GFSKModulator
         let config = GFSKConfig.ft8.withCarrierFrequency(frequency)
@@ -325,8 +311,8 @@ public final class FT8Modem {
                         passLLR = extraction.llr
                     }
 
-                    // LDPC decode
-                    guard let result = LDPC174_87.decode(
+                    // LDPC decode — (174,91) returns exactly 91 bits
+                    guard let result = LDPC174_91.decode(
                         llr: passLLR, maxBPIterations: 30, osdDepth: osdDepth
                     ) else { continue }
 
@@ -337,15 +323,8 @@ public final class FT8Modem {
                     if ipass > 1 && result.nharderrors > 39 { continue }
                     if decodePass == 3 && result.nharderrors > 30 { continue }
 
-                    // FT8-specific: Verify CRC-14 on the decoded bits.
-                    // The LDPC decoder returns K bits. For FT8, we need at least 91 bits
-                    // (77 message + 14 CRC). If K < 91, pad with zeros for CRC check.
-                    let decodedBits: [UInt8]
-                    if result.bits.count >= 91 {
-                        decodedBits = Array(result.bits.prefix(91))
-                    } else {
-                        decodedBits = result.bits + [UInt8](repeating: 0, count: 91 - result.bits.count)
-                    }
+                    // FT8-specific: Verify CRC-14 on the 91 decoded bits (77 msg + 14 CRC)
+                    let decodedBits = result.bits
                     guard FT8Codec.verifyCRC14(decodedBits) else { continue }
 
                     // FT8-specific: Unpack 77-bit message

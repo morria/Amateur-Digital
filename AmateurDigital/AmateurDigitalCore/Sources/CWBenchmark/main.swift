@@ -73,18 +73,6 @@ func addWhiteNoise(to signal: [Float], snrDB: Float, rng: inout SeededRandom) ->
     }
 }
 
-func applyFrequencyShift(to signal: [Float], shiftHz: Double, sampleRate: Double) -> [Float] {
-    // Shift the CW tone frequency by mixing with an offset oscillator
-    let phaseIncrement = 2.0 * .pi * shiftHz / sampleRate
-    var phase = 0.0
-    return signal.map { sample in
-        let shifted = sample * Float(cos(phase))
-        phase += phaseIncrement
-        if phase >= 2.0 * .pi { phase -= 2.0 * .pi }
-        return shifted
-    }
-}
-
 func applyFading(to signal: [Float], fadeRateHz: Double, fadeDepth: Float, sampleRate: Double) -> [Float] {
     let phaseIncrement = 2.0 * .pi * fadeRateHz / sampleRate
     var phase = 0.0
@@ -108,6 +96,34 @@ func addCWInterference(to signal: [Float], offsetHz: Double, relativeLevel: Floa
         if phase >= 2.0 * .pi { phase -= 2.0 * .pi }
         return sample + interferer
     }
+}
+
+func applyAGCPumping(to signal: [Float], depthDB: Float, rateHz: Double, sampleRate: Double = 48000) -> [Float] {
+    let phaseInc = 2.0 * .pi * rateHz / sampleRate
+    var phase = 0.0
+    return signal.map { sample in
+        let gainDB = depthDB * Float(cos(phase)) / 2.0
+        let gain = pow(10.0, gainDB / 20.0)
+        phase += phaseInc
+        return sample * gain
+    }
+}
+
+func resample(signal: [Float], fromRate: Double, toRate: Double) -> [Float] {
+    let ratio = fromRate / toRate
+    let outCount = Int(Double(signal.count) / ratio)
+    var output = [Float](repeating: 0, count: outCount)
+    for i in 0..<outCount {
+        let srcPos = Double(i) * ratio
+        let srcIdx = Int(srcPos)
+        let frac = Float(srcPos - Double(srcIdx))
+        if srcIdx + 1 < signal.count {
+            output[i] = signal[srcIdx] * (1.0 - frac) + signal[srcIdx + 1] * frac
+        } else if srcIdx < signal.count {
+            output[i] = signal[srcIdx]
+        }
+    }
+    return output
 }
 
 /// Generate CW with chirp: frequency shifts on key-down then settles.
@@ -209,12 +225,6 @@ func applyVariableDashDotRatio(to text: String, config: CWConfiguration, ratio: 
     return modulator.modulateText(text)
 }
 
-func generateCWAtDifferentFrequency(text: String, config: CWConfiguration, toneFreq: Double) -> [Float] {
-    let modConfig = config.withToneFrequency(toneFreq)
-    var modulator = CWModulator(configuration: modConfig)
-    return modulator.modulateTextWithEnvelope(text, preambleMs: 100, postambleMs: 100)
-}
-
 // MARK: - Scoring
 
 func characterErrorRate(expected: String, actual: String) -> Double {
@@ -283,7 +293,10 @@ class ClassicDecoderWrapper: CWDecoderWrapper {
         demodulator.process(samples: samples)
     }
 
-    var decodedText: String { delegate.decodedText }
+    var decodedText: String {
+        demodulator.flushPending()   // release copy still held in probation
+        return delegate.decodedText
+    }
 
     func reset() { delegate.reset() }
 }
@@ -306,7 +319,10 @@ class BayesianDecoderWrapper: CWDecoderWrapper {
         decoder.process(samples: samples)
     }
 
-    var decodedText: String { String(decodedCharacters) }
+    var decodedText: String {
+        decoder.flushPending()   // release copy still held in probation
+        return String(decodedCharacters)
+    }
 
     func reset() { decodedCharacters.removeAll() }
 }
@@ -314,6 +330,30 @@ class BayesianDecoderWrapper: CWDecoderWrapper {
 enum DecoderMode {
     case classic
     case bayesian
+    case dual
+}
+
+class DualDecoderWrapper: CWDecoderWrapper {
+    let decoder: DualCWDecoder
+    private var decodedCharacters: [Character] = []
+
+    init(configuration: CWConfiguration) {
+        self.decoder = DualCWDecoder(configuration: configuration)
+        self.decoder.onCharacterDecoded = { [weak self] char, _ in
+            self?.decodedCharacters.append(char)
+        }
+    }
+
+    func process(samples: [Float]) {
+        decoder.process(samples: samples)
+    }
+
+    var decodedText: String {
+        decoder.flush()   // resolve characters still waiting in the merge window
+        return String(decodedCharacters)
+    }
+
+    func reset() { decodedCharacters.removeAll() }
 }
 
 struct BenchmarkSuite {
@@ -341,19 +381,41 @@ struct BenchmarkSuite {
     /// Which decoder to use for this run.
     var decoderMode: DecoderMode = .classic
 
+    /// Classic decoder parameter overrides (loaded from --params JSON)
+    var cwOptimParams: CWOptimizationParams?
+
     func makeDecoder(configuration: CWConfiguration) -> CWDecoderWrapper {
         switch decoderMode {
         case .classic:
-            return ClassicDecoderWrapper(configuration: configuration)
+            let wrapper = ClassicDecoderWrapper(configuration: configuration)
+            // Apply optimization parameter overrides if present
+            if let p = cwOptimParams {
+                if let v = p.thresholdFractionClean { wrapper.demodulator.thresholdFractionClean = v }
+                if let v = p.thresholdFractionModerate { wrapper.demodulator.thresholdFractionModerate = v }
+                if let v = p.thresholdFractionNoisy { wrapper.demodulator.thresholdFractionNoisy = v }
+                if let v = p.signalDecayRate { wrapper.demodulator.signalDecayRate = v }
+                if let v = p.toneDetectMultiplier { wrapper.demodulator.toneDetectMultiplier = v }
+                if let v = p.bootstrapMultiplier { wrapper.demodulator.bootstrapMultiplier = v }
+                if let v = p.hysteresisOffRatio { wrapper.demodulator.hysteresisOffRatio = v }
+                if let v = p.minStatsFactor { wrapper.demodulator.minStatsFactor = v }
+            }
+            return wrapper
         case .bayesian:
             return BayesianDecoderWrapper(configuration: configuration, params: bayesianParams)
+        case .dual:
+            return DualDecoderWrapper(configuration: configuration)
         }
     }
 
     mutating func runAll() {
-        let modeLabel = decoderMode == .bayesian ? "BAYESIAN" : "CLASSIC"
+        let modeLabel: String
+        switch decoderMode {
+        case .classic:  modeLabel = "CLASSIC"
+        case .bayesian: modeLabel = "BAYESIAN"
+        case .dual:     modeLabel = "DUAL"
+        }
         print(String(repeating: "=", count: 70))
-        print("CW (MORSE CODE) DECODING BENCHMARK [\(modeLabel)]")
+        print("CW (MORSE CODE) DECODING BENCHMARK v2 [\(modeLabel)]")
         print(String(repeating: "=", count: 70))
         print()
 
@@ -370,8 +432,40 @@ struct BenchmarkSuite {
         runQRMTests()
         runChirpTests()
         runCWAuroralFlutterTests()
+        runAGCPumpingTests()
+        runSampleRateMismatchTests()
+        runMetamorphicTests()
         runFalsePositiveTest()
 
+        // Suite v2 categories (composite not comparable to v1 scores)
+        runColdStartTests()
+        runQRNTests()
+        runDriftTests()
+        runSwingTests()
+        runSpeedJitterTests()
+        runFarnsworthTests()
+        runToneFrequencyTests()
+        runLongFalsePositiveTest()
+        runAcousticFalsePositiveTests()
+        runChunkedParityTests()
+        runCallsignCopyTests()
+
+        printSummary()
+    }
+
+    /// Fast subset for false-positive tuning: the FP scenarios plus the
+    /// categories a stricter emission gate could regress (weak-signal
+    /// copy, cold start, hand-sent timing).
+    mutating func runFPSubset() {
+        runNoiseSweepTests()
+        runColdStartTests()
+        runSwingTests()
+        runSpeedJitterTests()
+        runFarnsworthTests()
+        runCombinedImpairmentTests()
+        runFalsePositiveTest()
+        runLongFalsePositiveTest()
+        runAcousticFalsePositiveTests()
         printSummary()
     }
 
@@ -509,7 +603,10 @@ struct BenchmarkSuite {
                 impairment: { samples in
                     var channel = makeChannel()
                     var faded = channel.process(samples)
-                    var rng = SeededRandom(seed: 200 + UInt64(name.hashValue & 0xFF))
+                    // Stable seed: String.hashValue is randomized per process,
+                    // which made these tests non-reproducible across runs.
+                    let stableSeed = name.unicodeScalars.reduce(UInt64(0)) { $0 &* 31 &+ UInt64($1.value) }
+                    var rng = SeededRandom(seed: 200 + (stableSeed & 0xFF))
                     return addWhiteNoise(to: faded, snrDB: 15, rng: &rng)
                 }
             )
@@ -821,6 +918,127 @@ struct BenchmarkSuite {
         print()
     }
 
+    // MARK: - AGC Pumping Tests
+
+    mutating func runAGCPumpingTests() {
+        print("--- AGC Pumping Tests (nearby strong station keying) ---")
+        let text = "CQ CQ DE W1AW K"
+
+        // Mild: 6 dB depth at 2 Hz (slow SSB operator nearby)
+        let r1 = runTest(
+            category: "agc_pumping", name: "mild_6dB_2Hz",
+            config: .standard, text: text,
+            impairment: { applyAGCPumping(to: $0, depthDB: 6, rateHz: 2) }
+        )
+        results.append(r1); printResult(r1)
+
+        // Moderate: 10 dB depth at 3 Hz (CW operator nearby)
+        let r2 = runTest(
+            category: "agc_pumping", name: "moderate_10dB_3Hz",
+            config: .standard, text: text,
+            impairment: { applyAGCPumping(to: $0, depthDB: 10, rateHz: 3) }
+        )
+        results.append(r2); printResult(r2)
+
+        // Severe: 15 dB depth at 5 Hz (fast QSK CW)
+        let r3 = runTest(
+            category: "agc_pumping", name: "severe_15dB_5Hz",
+            config: .standard, text: text,
+            impairment: { applyAGCPumping(to: $0, depthDB: 15, rateHz: 5) }
+        )
+        results.append(r3); printResult(r3)
+
+        print()
+    }
+
+    // MARK: - Sample Rate Mismatch Tests
+
+    mutating func runSampleRateMismatchTests() {
+        print("--- Sample Rate Mismatch Tests (cheap USB audio) ---")
+        let text = "CQ CQ DE W1AW K"
+
+        // 50 ppm slow
+        let r1 = runTest(
+            category: "sample_rate", name: "50ppm_slow",
+            config: .standard, text: text,
+            impairment: { resample(signal: $0, fromRate: 48000, toRate: 48000 * (1.0 - 50e-6)) }
+        )
+        results.append(r1); printResult(r1)
+
+        // 100 ppm slow
+        let r2 = runTest(
+            category: "sample_rate", name: "100ppm_slow",
+            config: .standard, text: text,
+            impairment: { resample(signal: $0, fromRate: 48000, toRate: 48000 * (1.0 - 100e-6)) }
+        )
+        results.append(r2); printResult(r2)
+
+        // 200 ppm fast
+        let r3 = runTest(
+            category: "sample_rate", name: "200ppm_fast",
+            config: .standard, text: text,
+            impairment: { resample(signal: $0, fromRate: 48000, toRate: 48000 * (1.0 + 200e-6)) }
+        )
+        results.append(r3); printResult(r3)
+
+        print()
+    }
+
+    // MARK: - Metamorphic Tests (decoder invariance properties)
+
+    mutating func runMetamorphicTests() {
+        print("--- Metamorphic Tests (invariance properties) ---")
+        let text = "CQ CQ DE W1AW K"
+
+        // Amplitude scaling: Goertzel power detection should handle wide dynamic range
+        for (name, scale) in [("amp_0.1x", Float(0.1)), ("amp_0.5x", Float(0.5)),
+                               ("amp_2x", Float(2.0)), ("amp_5x", Float(5.0))] {
+            let r = runTest(
+                category: "metamorphic", name: name,
+                config: .standard, text: text,
+                impairment: { $0.map { $0 * scale } }
+            )
+            results.append(r); printResult(r)
+        }
+
+        // Time shift: prepending silence should not affect decoding
+        for (name, ms) in [("delay_100ms", 100), ("delay_500ms", 500), ("delay_1000ms", 1000)] {
+            let delaySamples = 48000 * ms / 1000
+            let r = runTest(
+                category: "metamorphic", name: name,
+                config: .standard, text: text,
+                impairment: { signal in
+                    [Float](repeating: 0, count: delaySamples) + signal
+                }
+            )
+            results.append(r); printResult(r)
+        }
+
+        // Determinism: decoding same signal twice should produce identical output
+        var modulator = CWModulator(configuration: .standard)
+        let cwSamples = modulator.modulateTextWithEnvelope(text, preambleMs: 300, postambleMs: 500)
+
+        let decoder1 = makeDecoder(configuration: .standard)
+        decoder1.process(samples: cwSamples)
+        let decoded1 = decoder1.decodedText
+
+        let decoder2 = makeDecoder(configuration: .standard)
+        decoder2.process(samples: cwSamples)
+        let decoded2 = decoder2.decodedText
+
+        let detScore: Double = decoded1 == decoded2 ? 100.0 : 0.0
+        let r = TestResult(
+            category: "metamorphic", name: "determinism",
+            expected: text,
+            decoded: decoded1 == decoded2 ? decoded1 : "\(decoded1) vs \(decoded2)",
+            cer: decoded1 == decoded2 ? characterErrorRate(expected: text, actual: decoded1) : 1.0,
+            score: detScore
+        )
+        results.append(r); printResult(r)
+
+        print()
+    }
+
     // MARK: - False Positive Test
 
     mutating func runFalsePositiveTest() {
@@ -1044,7 +1262,20 @@ struct BenchmarkSuite {
             "qrm": 2.0,            // Nearby CW stations (contest/pileup)
             "chirp": 1.5,          // Transmitter frequency shift on key-down
             "auroral_flutter": 2.0, // Trans-polar CW path degradation
+            "agc_pumping": 1.5,     // AGC modulated by nearby strong station
+            "sample_rate": 1.5,     // Cheap USB audio clock mismatch
+            "metamorphic": 1.5,     // Invariance: amplitude, time shift, determinism
             "false_positive": 2.0,  // Must not decode noise
+            // Suite v2
+            "cold_start": 2.5,      // Decoder starts mid-signal (post-TX reality)
+            "qrn": 2.0,             // Impulsive static crashes
+            "drift": 1.5,           // Continuous VFO drift while locked
+            "swing": 2.0,           // Systematic straight-key/bug fist bias
+            "farnsworth": 1.5,      // Stretched gaps (teaching nets)
+            "speed_jitter": 1.5,    // Hand-sent at 30-40 WPM (quantization limit)
+            "tone_freq": 1.0,       // Coverage beyond 700 Hz
+            "chunked_parity": 1.5,  // App-sized buffers must decode identically
+            "callsign_copy": 2.5,   // Exact callsign copy = the app's routing currency
         ]
 
         var weightedSum = 0.0
@@ -1124,6 +1355,32 @@ struct BenchmarkSuite {
 
 // MARK: - Parameter Override (for automated optimization)
 
+/// Classic CW decoder parameters overridable via --params /path/to/params.json.
+/// Used by Optuna/CMA-ES to explore the parameter space automatically.
+struct CWOptimizationParams: Codable {
+    var thresholdFractionClean: Double?
+    var thresholdFractionModerate: Double?
+    var thresholdFractionNoisy: Double?
+    var signalDecayRate: Double?
+    var toneDetectMultiplier: Double?
+    var bootstrapMultiplier: Double?
+    var hysteresisOffRatio: Double?
+    var minStatsFactor: Double?
+}
+
+var cwOptimParams: CWOptimizationParams?
+if let idx = CommandLine.arguments.firstIndex(of: "--params"),
+   idx + 1 < CommandLine.arguments.count {
+    let path = CommandLine.arguments[idx + 1]
+    if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+       let params = try? JSONDecoder().decode(CWOptimizationParams.self, from: data) {
+        cwOptimParams = params
+        print("Loaded CW optimization params from \(path)")
+    } else {
+        print("Warning: could not load CW params from \(path)")
+    }
+}
+
 var bayesianParams: BayesianCWParams?
 if let idx = CommandLine.arguments.firstIndex(of: "--bayesian-params"),
    idx + 1 < CommandLine.arguments.count {
@@ -1139,10 +1396,38 @@ if let idx = CommandLine.arguments.firstIndex(of: "--bayesian-params"),
 
 let bayesianOnly = CommandLine.arguments.contains("--bayesian-only")
 let compareMode = CommandLine.arguments.contains("--compare")
+let dualOnly = CommandLine.arguments.contains("--dual")
+
+// Real off-air corpus: score WAV recordings against sidecar transcripts.
+// Held out of the synthetic composite — this is the overfitting check.
+if let corpusIdx = CommandLine.arguments.firstIndex(of: "--corpus"),
+   corpusIdx + 1 < CommandLine.arguments.count {
+    let directory = CommandLine.arguments[corpusIdx + 1]
+    let mode: DecoderMode = dualOnly ? .dual : (bayesianOnly ? .bayesian : .classic)
+    CorpusRunner.run(directory: directory, mode: mode, bayesianParams: bayesianParams)
+    exit(0)
+}
 
 // MARK: - Main
 
-if bayesianOnly {
+let fpOnly = CommandLine.arguments.contains("--fp-only")
+
+if fpOnly {
+    // Fast loop for false-positive tuning; --dual / --bayesian-only pick the decoder.
+    let mode: DecoderMode = dualOnly ? .dual : (bayesianOnly ? .bayesian : .classic)
+    print("Starting CW benchmark (FP subset, \(mode))...")
+    var suite = BenchmarkSuite()
+    suite.decoderMode = mode
+    suite.bayesianParams = bayesianParams
+    suite.cwOptimParams = cwOptimParams
+    suite.runFPSubset()
+} else if dualOnly {
+    // Run only the dual (diversity) decoder — what the Dits app ships.
+    print("Starting CW benchmark (Dual/diversity only)...")
+    var suite = BenchmarkSuite()
+    suite.decoderMode = .dual
+    suite.runAll()
+} else if bayesianOnly {
     // Run only the Bayesian decoder (for Optuna optimization speed)
     print("Starting CW benchmark (Bayesian only)...")
     var suite = BenchmarkSuite()
@@ -1168,5 +1453,6 @@ if bayesianOnly {
     print("Starting CW benchmark...")
     var suite = BenchmarkSuite()
     suite.decoderMode = .classic
+    suite.cwOptimParams = cwOptimParams
     suite.runAll()
 }

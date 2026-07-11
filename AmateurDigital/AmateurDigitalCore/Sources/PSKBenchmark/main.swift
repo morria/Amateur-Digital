@@ -137,6 +137,35 @@ func addAdjacentChannelInterference(to signal: [Float], interferenceFreqOffset: 
     }
 }
 
+func applyAGCPumping(to signal: [Float], depthDB: Float, rateHz: Double, sampleRate: Double = 48000) -> [Float] {
+    let phaseInc = 2.0 * .pi * rateHz / sampleRate
+    var phase = 0.0
+    return signal.map { sample in
+        // Gain oscillates between 1/halfDepth and halfDepth (centered at 1.0 in log space)
+        let gainDB = depthDB * Float(cos(phase)) / 2.0
+        let gain = pow(10.0, gainDB / 20.0)
+        phase += phaseInc
+        return sample * gain
+    }
+}
+
+func resample(signal: [Float], fromRate: Double, toRate: Double) -> [Float] {
+    let ratio = fromRate / toRate
+    let outCount = Int(Double(signal.count) / ratio)
+    var output = [Float](repeating: 0, count: outCount)
+    for i in 0..<outCount {
+        let srcPos = Double(i) * ratio
+        let srcIdx = Int(srcPos)
+        let frac = Float(srcPos - Double(srcIdx))
+        if srcIdx + 1 < signal.count {
+            output[i] = signal[srcIdx] * (1.0 - frac) + signal[srcIdx + 1] * frac
+        } else if srcIdx < signal.count {
+            output[i] = signal[srcIdx]
+        }
+    }
+    return output
+}
+
 // MARK: - Scoring
 
 func characterErrorRate(expected: String, actual: String) -> Double {
@@ -201,6 +230,9 @@ struct BenchmarkSuite {
     var results: [TestResult] = []
     let delegate = BenchmarkDelegate()
 
+    /// Optimization parameter overrides (loaded from --params JSON)
+    var optimParams: PSKOptimizationParams?
+
     mutating func runAll() {
         print(repeatStr("=", 70))
         print("PSK DECODING BENCHMARK")
@@ -219,6 +251,10 @@ struct BenchmarkSuite {
         runITUChannelTests()
         runLongMessageTests()
         runAuroralFlutterTests()
+        runNVISTests()
+        runAGCPumpingTests()
+        runSampleRateMismatchTests()
+        runMetamorphicTests()
         runNoiseOnlyFalsePositiveTest()
 
         printSummary()
@@ -724,6 +760,194 @@ struct BenchmarkSuite {
         print()
     }
 
+    // MARK: - NVIS O/X Mode Splitting Tests
+
+    mutating func runNVISTests() {
+        print("--- NVIS O/X Mode Splitting Tests (80m/60m near-vertical paths) ---")
+        let text = "CQ CQ CQ DE W1AW W1AW K"
+
+        // Mild: 0.5 ms delay, 0.1 Hz Doppler (quiet 80m evening)
+        let r1 = runSingleTest(
+            category: "nvis", name: "mild_0.5ms_0.1Hz", mode: "PSK31",
+            config: .psk31, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 0.1, pathDelay: 0.0005, seed: 601)
+                return channel.process(samples)
+            }
+        )
+        results.append(r1); printResult(r1)
+
+        // Moderate: 1 ms delay, 0.2 Hz Doppler (typical NVIS)
+        let r2 = runSingleTest(
+            category: "nvis", name: "moderate_1ms_0.2Hz", mode: "PSK31",
+            config: .psk31, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 0.2, pathDelay: 0.001, seed: 602)
+                return channel.process(samples)
+            }
+        )
+        results.append(r2); printResult(r2)
+
+        // Severe: 2 ms delay, 0.2 Hz Doppler (worst-case O/X splitting)
+        let r3 = runSingleTest(
+            category: "nvis", name: "severe_2ms_0.2Hz", mode: "PSK31",
+            config: .psk31, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 0.2, pathDelay: 0.002, seed: 603)
+                return channel.process(samples)
+            }
+        )
+        results.append(r3); printResult(r3)
+
+        // BPSK63 with moderate NVIS (higher baud rate — more sensitive to delay?)
+        let r4 = runSingleTest(
+            category: "nvis", name: "bpsk63_1ms_0.2Hz", mode: "BPSK63",
+            config: .bpsk63, text: text,
+            impairment: { samples in
+                var channel = WattersonChannel(dopplerSpread: 0.2, pathDelay: 0.001, seed: 604)
+                return channel.process(samples)
+            }
+        )
+        results.append(r4); printResult(r4)
+
+        print()
+    }
+
+    // MARK: - AGC Pumping Tests
+
+    mutating func runAGCPumpingTests() {
+        print("--- AGC Pumping Tests (nearby strong station keying) ---")
+        let text = "CQ CQ CQ DE W1AW W1AW K"
+
+        // Mild: 6 dB depth at 2 Hz (slow SSB operator)
+        let r1 = runSingleTest(
+            category: "agc_pumping", name: "mild_6dB_2Hz", mode: "PSK31",
+            config: .psk31, text: text,
+            impairment: { applyAGCPumping(to: $0, depthDB: 6, rateHz: 2) }
+        )
+        results.append(r1); printResult(r1)
+
+        // Moderate: 10 dB depth at 3 Hz (CW operator nearby)
+        let r2 = runSingleTest(
+            category: "agc_pumping", name: "moderate_10dB_3Hz", mode: "PSK31",
+            config: .psk31, text: text,
+            impairment: { applyAGCPumping(to: $0, depthDB: 10, rateHz: 3) }
+        )
+        results.append(r2); printResult(r2)
+
+        // Severe: 15 dB depth at 5 Hz (fast QSK CW)
+        let r3 = runSingleTest(
+            category: "agc_pumping", name: "severe_15dB_5Hz", mode: "PSK31",
+            config: .psk31, text: text,
+            impairment: { applyAGCPumping(to: $0, depthDB: 15, rateHz: 5) }
+        )
+        results.append(r3); printResult(r3)
+
+        // BPSK63 with moderate pumping (higher baud rate = more resilient?)
+        let r4 = runSingleTest(
+            category: "agc_pumping", name: "bpsk63_10dB_3Hz", mode: "BPSK63",
+            config: .bpsk63, text: text,
+            impairment: { applyAGCPumping(to: $0, depthDB: 10, rateHz: 3) }
+        )
+        results.append(r4); printResult(r4)
+
+        print()
+    }
+
+    // MARK: - Sample Rate Mismatch Tests
+
+    mutating func runSampleRateMismatchTests() {
+        print("--- Sample Rate Mismatch Tests (cheap USB audio) ---")
+        let text = "CQ CQ CQ DE W1AW W1AW K"
+
+        // 50 ppm slow (47997.6 Hz actual when expecting 48000)
+        let r1 = runSingleTest(
+            category: "sample_rate", name: "50ppm_slow", mode: "PSK31",
+            config: .psk31, text: text,
+            impairment: { resample(signal: $0, fromRate: 48000, toRate: 48000 * (1.0 - 50e-6)) }
+        )
+        results.append(r1); printResult(r1)
+
+        // 100 ppm slow (worse USB audio)
+        let r2 = runSingleTest(
+            category: "sample_rate", name: "100ppm_slow", mode: "PSK31",
+            config: .psk31, text: text,
+            impairment: { resample(signal: $0, fromRate: 48000, toRate: 48000 * (1.0 - 100e-6)) }
+        )
+        results.append(r2); printResult(r2)
+
+        // 200 ppm fast (aggressive mismatch)
+        let r3 = runSingleTest(
+            category: "sample_rate", name: "200ppm_fast", mode: "PSK31",
+            config: .psk31, text: text,
+            impairment: { resample(signal: $0, fromRate: 48000, toRate: 48000 * (1.0 + 200e-6)) }
+        )
+        results.append(r3); printResult(r3)
+
+        print()
+    }
+
+    // MARK: - Metamorphic Tests (decoder invariance properties)
+
+    mutating func runMetamorphicTests() {
+        print("--- Metamorphic Tests (invariance properties) ---")
+        let text = "CQ CQ CQ DE W1AW K"
+
+        // Amplitude scaling: PSK phase detection should be amplitude-independent
+        for (name, scale) in [("amp_0.1x", Float(0.1)), ("amp_0.5x", Float(0.5)),
+                               ("amp_2x", Float(2.0)), ("amp_5x", Float(5.0))] {
+            let r = runSingleTest(
+                category: "metamorphic", name: name, mode: "PSK31",
+                config: .psk31, text: text,
+                impairment: { $0.map { $0 * scale } }
+            )
+            results.append(r); printResult(r)
+        }
+
+        // Time shift: prepending silence should not affect decoding
+        for (name, ms) in [("delay_100ms", 100), ("delay_500ms", 500), ("delay_1000ms", 1000)] {
+            let delaySamples = 48000 * ms / 1000
+            let r = runSingleTest(
+                category: "metamorphic", name: name, mode: "PSK31",
+                config: .psk31, text: text,
+                impairment: { signal in
+                    [Float](repeating: 0, count: delaySamples) + signal
+                }
+            )
+            results.append(r); printResult(r)
+        }
+
+        // Determinism: decoding same signal twice should produce identical output
+        var modulator = PSKModulator(configuration: .psk31)
+        let samples = modulator.modulateTextWithEnvelope(text, preambleMs: 200, postambleMs: 100)
+
+        let demod1 = PSKDemodulator(configuration: .psk31)
+        delegate.reset()
+        demod1.delegate = delegate
+        demod1.squelchLevel = 0.1
+        demod1.process(samples: samples)
+        let decoded1 = delegate.decodedText
+
+        let demod2 = PSKDemodulator(configuration: .psk31)
+        delegate.reset()
+        demod2.delegate = delegate
+        demod2.squelchLevel = 0.1
+        demod2.process(samples: samples)
+        let decoded2 = delegate.decodedText
+
+        let detScore: Double = decoded1 == decoded2 ? 100.0 : 0.0
+        let r = TestResult(
+            category: "metamorphic", name: "determinism", mode: "PSK31",
+            expected: text,
+            decoded: decoded1 == decoded2 ? decoded1 : "\(decoded1) vs \(decoded2)",
+            cer: decoded1 == decoded2 ? characterErrorRate(expected: text, actual: decoded1) : 1.0,
+            score: detScore
+        )
+        results.append(r); printResult(r)
+
+        print()
+    }
+
     // MARK: - Noise-Only False Positive Test
 
     mutating func runNoiseOnlyFalsePositiveTest() {
@@ -873,6 +1097,14 @@ struct BenchmarkSuite {
     ) -> TestResult {
         var modulator = PSKModulator(configuration: config)
         let demodulator = PSKDemodulator(configuration: config)
+        // Apply optimization parameter overrides if present
+        if let p = optimParams {
+            if let v = p.phaseQualityThreshold { demodulator.phaseQualityThreshold = v }
+            if let v = p.signalPersistRequired { demodulator.signalPersistRequired = v }
+            if let v = p.afcIntegralGain { demodulator.afcIntegralGain = v }
+            if let v = p.afcDeadZone { demodulator.afcDeadZone = v }
+            if let v = p.squelchMultiplier { demodulator.squelchMultiplier = v }
+        }
         delegate.reset()
         demodulator.delegate = delegate
         demodulator.squelchLevel = 0.1  // Lower squelch for benchmark
@@ -951,6 +1183,10 @@ struct BenchmarkSuite {
             "fading": 2.0,          // HF fading is critical for real-world
             "itu_channel": 2.5,     // ITU standard HF propagation
             "auroral_flutter": 2.0, // Trans-polar path — destroys narrowband PSK
+            "nvis": 2.0,            // NVIS O/X mode splitting on 80m/60m
+            "agc_pumping": 1.5,     // AGC modulated by nearby strong station
+            "sample_rate": 1.5,     // Cheap USB audio clock mismatch
+            "metamorphic": 1.5,     // Invariance: amplitude, time shift, determinism
             "long_msg": 1.5,        // Sustained decode reliability
             "false_positive": 2.0,  // Must not decode noise as signal
         ]
@@ -1041,9 +1277,35 @@ func repeatStr(_ s: String, _ count: Int) -> String {
     String(repeating: s, count: count)
 }
 
+// MARK: - Parameter Override (for automated optimization)
+
+/// PSK decoder parameters overridable via --params /path/to/params.json.
+/// Used by Optuna/CMA-ES to explore the parameter space automatically.
+struct PSKOptimizationParams: Codable {
+    var phaseQualityThreshold: Double?
+    var signalPersistRequired: Int?
+    var afcIntegralGain: Double?
+    var afcDeadZone: Double?
+    var squelchMultiplier: Float?
+}
+
+var pskOptimParams: PSKOptimizationParams?
+if let idx = CommandLine.arguments.firstIndex(of: "--params"),
+   idx + 1 < CommandLine.arguments.count {
+    let path = CommandLine.arguments[idx + 1]
+    if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+       let params = try? JSONDecoder().decode(PSKOptimizationParams.self, from: data) {
+        pskOptimParams = params
+        print("Loaded PSK optimization params from \(path)")
+    } else {
+        print("Warning: could not load PSK params from \(path)")
+    }
+}
+
 // MARK: - Main
 
 print("Starting benchmark...")
 var suite = BenchmarkSuite()
+suite.optimParams = pskOptimParams
 print("Suite created")
 suite.runAll()

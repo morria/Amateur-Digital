@@ -36,27 +36,32 @@ public final class DualCWDecoder {
     private struct TimedChar {
         let character: Character
         let frequency: Double
-        let timestamp: Int  // block count at time of decode
+        let timestamp: Int  // sample clock at time of decode
     }
 
     /// Pending characters from each decoder, waiting for merge
     private var classicPending: [TimedChar] = []
     private var bayesianPending: [TimedChar] = []
 
-    /// Block counter (incremented per process call for coarse timing)
-    private var blockCounter: Int = 0
+    /// Sample clock: total samples fed so far. Using samples (not process()
+    /// call counts) makes merge timing independent of the caller's buffer
+    /// size — a benchmark feeding one giant buffer and an app feeding 85 ms
+    /// chunks behave identically.
+    private var sampleClock: Int = 0
 
-    /// Merge window in blocks. At 48kHz with 4096-sample audio buffers,
-    /// each process() call is ~85ms. 4 blocks = ~340ms merge window.
-    private let mergeWindowBlocks: Int = 4
+    /// Merge window in samples (~350 ms): how long a character may wait for
+    /// its counterpart from the other decoder before the disagreement is
+    /// resolved.
+    private let mergeWindowSamples: Int
 
-    /// Recent character counts for adaptive selection (sliding window)
-    private var classicRecentCount: Int = 0
-    private var bayesianRecentCount: Int = 0
-
-    /// Decay counter for resetting recent counts periodically
-    private var decayCounter: Int = 0
-    private let decayInterval: Int = 20  // Reset counts every ~20 blocks (~1.7s)
+    /// Reliability = EMA of each decoder's recent agreement fraction.
+    /// Characters the decoders agree on raise both; characters that lose a
+    /// disagreement lower the loser. This prefers the decoder that is
+    /// *corroborated*, not the one that merely produces more output —
+    /// in noise, a hallucinating decoder out-produces an accurate one.
+    private var classicReliability: Double = 0.60   // slight classic bias at start
+    private var bayesianReliability: Double = 0.50
+    private let reliabilityAlpha: Double = 0.08
 
     // MARK: - Callbacks
 
@@ -95,11 +100,30 @@ public final class DualCWDecoder {
         classicDecoder.currentConfiguration
     }
 
+    /// Minimum tracked speed, forwarded to both sub-decoders.
+    public var minWPM: Double {
+        get { classicDecoder.minWPM }
+        set {
+            classicDecoder.minWPM = newValue
+            bayesianDecoder.minWPM = newValue
+        }
+    }
+
+    /// Maximum tracked speed, forwarded to both sub-decoders.
+    public var maxWPM: Double {
+        get { classicDecoder.maxWPM }
+        set {
+            classicDecoder.maxWPM = newValue
+            bayesianDecoder.maxWPM = newValue
+        }
+    }
+
     // MARK: - Initialization
 
     public init(configuration: CWConfiguration = .standard) {
         self.classicDecoder = CWDemodulator(configuration: configuration)
         self.bayesianDecoder = BayesianCWDecoder(configuration: configuration)
+        self.mergeWindowSamples = Int(0.35 * configuration.sampleRate)
 
         // Wire up classic decoder via delegate adapter
         classicDecoder.delegate = classicAdapter
@@ -119,23 +143,27 @@ public final class DualCWDecoder {
 
     // MARK: - Processing
 
+    /// Background/low-power: run only the classic leg. Halves the DSP
+    /// cost while the app isn't frontmost; the Bayesian leg keeps its
+    /// calibration and is resynchronized when full power returns.
+    public var lowPowerMode: Bool = false {
+        didSet {
+            guard oldValue != lowPowerMode, !lowPowerMode else { return }
+            bayesianDecoder.resynchronize()
+        }
+    }
+
     public func process(samples: [Float]) {
-        blockCounter += 1
+        sampleClock += samples.count
 
         // Feed audio to both decoders simultaneously
         classicDecoder.process(samples: samples)
-        bayesianDecoder.process(samples: samples)
+        if !lowPowerMode {
+            bayesianDecoder.process(samples: samples)
+        }
 
         // Attempt to merge pending characters
         flushMergeWindow()
-
-        // Periodic decay of recent counts for adaptive selection
-        decayCounter += 1
-        if decayCounter >= decayInterval {
-            decayCounter = 0
-            classicRecentCount = classicRecentCount / 2
-            bayesianRecentCount = bayesianRecentCount / 2
-        }
     }
 
     // MARK: - Character Callbacks from Sub-Decoders
@@ -144,18 +172,16 @@ public final class DualCWDecoder {
         classicPending.append(TimedChar(
             character: character,
             frequency: frequency,
-            timestamp: blockCounter
+            timestamp: sampleClock
         ))
-        classicRecentCount += 1
     }
 
     private func onBayesianCharacter(_ character: Character, frequency: Double) {
         bayesianPending.append(TimedChar(
             character: character,
             frequency: frequency,
-            timestamp: blockCounter
+            timestamp: sampleClock
         ))
-        bayesianRecentCount += 1
     }
 
     fileprivate func onDecoderSignalChanged() {
@@ -166,78 +192,176 @@ public final class DualCWDecoder {
 
     // MARK: - Merge Logic
 
-    /// Flush characters whose merge window has expired.
+    /// Merge the two character streams, preserving temporal order.
     ///
-    /// Strategy:
-    /// 1. If both decoders produced the same character within the merge window, emit it (agreement).
-    /// 2. If only one decoder produced a character and the window expired, emit it from
-    ///    the decoder with higher recent output rate (adaptive selection).
-    /// 3. Spaces are always passed through from the preferred decoder (they indicate word gaps).
+    /// Strategy (order-safe by construction — output is only ever produced
+    /// from the queue heads, never from the middle):
+    ///
+    /// 1. **Agreement:** while both queue heads hold the same character within
+    ///    the merge window, emit it once and credit both decoders.
+    /// 2. **Disagreement:** when the heads differ, wait until the older head
+    ///    falls out of the merge window, then resolve the whole disagreement
+    ///    run at once: emit the more *reliable* decoder's characters and drop
+    ///    the other's. Reliability is an EMA of agreement fraction, so the
+    ///    decoder whose output is regularly corroborated wins — NOT the one
+    ///    that produces the most characters (in noise the hallucinating
+    ///    decoder produces more, not better, output).
+    /// 3. **Solo output:** if only one decoder produced anything (the other
+    ///    queue stayed empty past the window), emit it — a silent decoder
+    ///    casts no vote against a producing one.
     private func flushMergeWindow() {
-        let cutoff = blockCounter - mergeWindowBlocks
-
-        // First pass: find matching characters (agreement between decoders)
-        var classicConsumed = Set<Int>()
-        var bayesianConsumed = Set<Int>()
-
-        for (ci, classic) in classicPending.enumerated() {
-            for (bi, bayesian) in bayesianPending.enumerated() {
-                if bayesianConsumed.contains(bi) { continue }
-                // Characters match if they're the same and within the merge window
-                if classic.character == bayesian.character &&
-                   abs(classic.timestamp - bayesian.timestamp) <= mergeWindowBlocks {
-                    // Agreement — emit immediately
-                    onCharacterDecoded?(classic.character, classic.frequency)
-                    classicConsumed.insert(ci)
-                    bayesianConsumed.insert(bi)
-                    break
-                }
-            }
+        // Phase 1: emit head-to-head agreements immediately.
+        while let c = classicPending.first, let b = bayesianPending.first,
+              c.character == b.character,
+              abs(c.timestamp - b.timestamp) <= mergeWindowSamples {
+            classicPending.removeFirst()
+            bayesianPending.removeFirst()
+            onCharacterDecoded?(c.character, c.frequency)
+            credit(&classicReliability, hit: true)
+            credit(&bayesianReliability, hit: true)
         }
 
-        // Remove consumed entries
-        classicPending = classicPending.enumerated()
-            .filter { !classicConsumed.contains($0.offset) }
-            .map { $0.element }
-        bayesianPending = bayesianPending.enumerated()
-            .filter { !bayesianConsumed.contains($0.offset) }
-            .map { $0.element }
+        // Phase 2: resolve expired disagreements.
+        let cutoff = sampleClock - mergeWindowSamples
+        let classicExpired = classicPending.prefix { $0.timestamp <= cutoff }
+        let bayesianExpired = bayesianPending.prefix { $0.timestamp <= cutoff }
+        guard !classicExpired.isEmpty || !bayesianExpired.isEmpty else { return }
 
-        // Second pass: emit expired characters from the preferred decoder
-        let classicExpired = classicPending.filter { $0.timestamp <= cutoff }
-        let bayesianExpired = bayesianPending.filter { $0.timestamp <= cutoff }
-
-        // Determine preferred decoder based on recent output rate
-        let preferClassic = classicRecentCount >= bayesianRecentCount
-
-        if preferClassic {
-            // Emit classic decoder's expired characters
-            for char in classicExpired {
-                onCharacterDecoded?(char.character, char.frequency)
-            }
+        if classicExpired.isEmpty {
+            // Bayesian-only output: emit it, no penalty for the silent side.
+            for char in bayesianExpired { onCharacterDecoded?(char.character, char.frequency) }
+            bayesianPending.removeFirst(bayesianExpired.count)
+        } else if bayesianExpired.isEmpty {
+            for char in classicExpired { onCharacterDecoded?(char.character, char.frequency) }
+            classicPending.removeFirst(classicExpired.count)
         } else {
-            // Emit bayesian decoder's expired characters
-            for char in bayesianExpired {
-                onCharacterDecoded?(char.character, char.frequency)
+            // True disagreement: align the two runs and emit the merged
+            // reading instead of winner-take-all — a single inserted
+            // character used to forfeit the whole region.
+            resolveDisagreement(Array(classicExpired), Array(bayesianExpired))
+            classicPending.removeFirst(classicExpired.count)
+            bayesianPending.removeFirst(bayesianExpired.count)
+
+            // The resolved region may have desynchronized the heads; retry
+            // agreement immediately so a match right after the region isn't
+            // forced to wait out another window.
+            flushAgreementsAfterResolve()
+        }
+    }
+
+    /// Merge two disagreement runs via longest-common-subsequence
+    /// alignment: characters both decoders produced (possibly at
+    /// different positions) are corroborated and always emitted, in
+    /// order; the divergent stretches between them go to whichever
+    /// decoder is currently more reliable. Recovers the agreeing
+    /// majority of a region that one stray insertion used to forfeit.
+    private func resolveDisagreement(_ classicRun: [TimedChar], _ bayesianRun: [TimedChar]) {
+        let a = classicRun.map(\.character)
+        let b = bayesianRun.map(\.character)
+        var dp = [[Int]](repeating: [Int](repeating: 0, count: b.count + 1),
+                         count: a.count + 1)
+        for i in stride(from: a.count - 1, through: 0, by: -1) {
+            for j in stride(from: b.count - 1, through: 0, by: -1) {
+                dp[i][j] = a[i] == b[j]
+                    ? dp[i + 1][j + 1] + 1
+                    : max(dp[i + 1][j], dp[i][j + 1])
             }
         }
 
-        // Remove all expired entries from both queues
-        classicPending.removeAll { $0.timestamp <= cutoff }
-        bayesianPending.removeAll { $0.timestamp <= cutoff }
+        let preferClassic = classicReliability >= bayesianReliability
+        var divergentClassic: [TimedChar] = []
+        var divergentBayesian: [TimedChar] = []
+
+        func emitDivergent() {
+            guard !divergentClassic.isEmpty || !divergentBayesian.isEmpty else { return }
+            let winner = preferClassic ? divergentClassic : divergentBayesian
+            for ch in winner { onCharacterDecoded?(ch.character, ch.frequency) }
+            credit(&classicReliability, hit: preferClassic)
+            credit(&bayesianReliability, hit: !preferClassic)
+            divergentClassic.removeAll()
+            divergentBayesian.removeAll()
+        }
+
+        var i = 0
+        var j = 0
+        while i < a.count, j < b.count {
+            if a[i] == b[j] {
+                emitDivergent()
+                onCharacterDecoded?(classicRun[i].character, classicRun[i].frequency)
+                credit(&classicReliability, hit: true)
+                credit(&bayesianReliability, hit: true)
+                i += 1
+                j += 1
+            } else if dp[i + 1][j] >= dp[i][j + 1] {
+                divergentClassic.append(classicRun[i])
+                i += 1
+            } else {
+                divergentBayesian.append(bayesianRun[j])
+                j += 1
+            }
+        }
+        divergentClassic.append(contentsOf: classicRun[i...])
+        divergentBayesian.append(contentsOf: bayesianRun[j...])
+        emitDivergent()
+    }
+
+    private func flushAgreementsAfterResolve() {
+        while let c = classicPending.first, let b = bayesianPending.first,
+              c.character == b.character,
+              abs(c.timestamp - b.timestamp) <= mergeWindowSamples {
+            classicPending.removeFirst()
+            bayesianPending.removeFirst()
+            onCharacterDecoded?(c.character, c.frequency)
+            credit(&classicReliability, hit: true)
+            credit(&bayesianReliability, hit: true)
+        }
+    }
+
+    private func credit(_ reliability: inout Double, hit: Bool) {
+        reliability = reliability * (1 - reliabilityAlpha) + (hit ? reliabilityAlpha : 0)
     }
 
     // MARK: - Control
+
+    /// Resolve all pending characters immediately (end of stream). During
+    /// continuous operation the merge window handles this; call flush() when
+    /// no more audio will arrive so trailing characters aren't stranded.
+    public func flush() {
+        // Give copy still held in emission probation its last-chance
+        // structural check before resolving the merge window.
+        classicDecoder.flushPending()
+        bayesianDecoder.flushPending()
+        flushAgreementsAfterResolve()
+        guard !classicPending.isEmpty || !bayesianPending.isEmpty else { return }
+
+        if classicPending.isEmpty {
+            for ch in bayesianPending { onCharacterDecoded?(ch.character, ch.frequency) }
+        } else if bayesianPending.isEmpty {
+            for ch in classicPending { onCharacterDecoded?(ch.character, ch.frequency) }
+        } else {
+            resolveDisagreement(classicPending, bayesianPending)
+        }
+        classicPending.removeAll()
+        bayesianPending.removeAll()
+    }
+
+    /// Preserve both sub-decoders' calibration across a transmit gap.
+    /// Pending characters were decoded before the gap and are emitted
+    /// (via flush) rather than dropped.
+    public func resynchronize() {
+        flush()
+        classicDecoder.resynchronize()
+        bayesianDecoder.resynchronize()
+    }
 
     public func reset() {
         classicDecoder.reset()
         bayesianDecoder.reset()
         classicPending.removeAll()
         bayesianPending.removeAll()
-        classicRecentCount = 0
-        bayesianRecentCount = 0
-        blockCounter = 0
-        decayCounter = 0
+        sampleClock = 0
+        classicReliability = 0.60
+        bayesianReliability = 0.50
     }
 }
 

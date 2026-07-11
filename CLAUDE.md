@@ -81,6 +81,10 @@ cd AmateurDigital/RattlegramCore && swift run RattlegramBenchmark
 │   ├── deploy-pages.yml               # Deploys website/ to GitHub Pages
 │   └── test.yml                       # Runs AmateurDigitalCore tests (macOS 14, Xcode 15.4)
 ├── scripts/                           # Python analysis tools for RTTY/PSK signal processing
+├── panoradio/                         # Panoradio HF signal classification dataset (Scholl 2019)
+│   ├── dataset_hf_radio.npy           # 172,800 × 2,048 complex IQ signals, 18 modes, 8 SNR levels (5.3 GB)
+│   ├── dataset_panoradio_hf_tags.csv  # Labels: idx, mode, snr
+│   └── dataset_panoradio_hf_readme.txt
 ├── samples/                           # Test WAV files (~40 MB): RTTY and PSK at varying SNR
 ├── research/                          # Reference source code (~650 MB)
 │   ├── fldigi/                        # Full fldigi source
@@ -270,6 +274,8 @@ Two CoreML models integrated into the iOS app:
 - **CallsignExtractor** — extracts ITU-format callsigns from decoded text.
 
 Training code in `HamTextClassifierTraining/` and `CallsignExtractorTraining/` (Python).
+
+**Training data**: `panoradio/` contains the Panoradio HF dataset (Scholl 2019) — 172,800 IQ signal vectors across 18 HF modes at 8 SNR levels. 6 modes directly match our decoders (CW, PSK31, PSK63, QPSK31, RTTY 45/170, RTTY 50/170). See `docs/mode-detection.md` for details.
 
 ## CI/CD
 

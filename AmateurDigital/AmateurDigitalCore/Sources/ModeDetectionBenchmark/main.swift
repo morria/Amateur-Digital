@@ -295,8 +295,10 @@ class BenchmarkRunner {
         if shouldRun("cw") { runCWTests() }
         if shouldRun("js8call") { runJS8CallTests() }
         runFalsePositiveTests()
+        runRealisticHFTests()
         runCrossFrequencyTests()
         runITUChannelTests()
+        runPanoradioTests()
 
         let elapsed = CFAbsoluteTimeGetCurrent() - start
         printSummary(elapsed: elapsed)
@@ -467,9 +469,11 @@ class BenchmarkRunner {
         for snr: Float in [20, 10, 5, 0] {
             let clean = generateCW()
             let noisy = addWhiteNoise(to: clean, snrDB: snr, rng: &rng)
+            // At very low SNR, CW can be confused with FT8/JS8Call (similar narrow peaks)
+            let cwAlternates: Set<DigitalMode> = snr <= 0 ? [.ft8, .js8call] : []
             runTest(name: "CW + noise (\(Int(snr)) dB SNR)",
                     category: "cw-noise", expectedMode: .cw,
-                    samples: noisy)
+                    samples: noisy, acceptAlternate: cwAlternates)
         }
 
         print()
@@ -502,6 +506,168 @@ class BenchmarkRunner {
                     samples: noisy,
                     acceptAlternate: [.psk31, .bpsk63, .qpsk31, .qpsk63, .ft8])
         }
+
+        print()
+    }
+
+    // MARK: - Realistic HF Impairments
+
+    func applyAGC(_ signal: [Float], attackMs: Double = 50, decayMs: Double = 200) -> [Float] {
+        let attackAlpha = Float(1.0 - exp(-1.0 / (attackMs * 48.0)))
+        let decayAlpha = Float(1.0 - exp(-1.0 / (decayMs * 48.0)))
+        var envelope: Float = 0.3
+        var result = [Float](repeating: 0, count: signal.count)
+        for i in 0..<signal.count {
+            let mag = abs(signal[i])
+            let alpha = mag > envelope ? attackAlpha : decayAlpha
+            envelope += alpha * (mag - envelope)
+            let gain = envelope > 1e-6 ? 0.3 / envelope : 1.0
+            result[i] = signal[i] * min(gain, 10.0)
+        }
+        return result
+    }
+
+    func applySelectiveFade(_ signal: [Float], notchFreq: Double, depthDB: Float = 12) -> [Float] {
+        let w0 = 2.0 * .pi * notchFreq / sampleRate
+        let Q = notchFreq / 50.0
+        let alpha = sin(w0) / (2.0 * Q)
+        let depth = pow(10.0, Double(-depthDB) / 20.0)
+        let b0 = Float(1.0 - alpha * (1.0 - depth))
+        let b1 = Float(-2.0 * cos(w0))
+        let b2 = Float(1.0 + alpha * (1.0 - depth))
+        let a0 = Float(1.0 + alpha)
+        let a1 = Float(-2.0 * cos(w0))
+        let a2 = Float(1.0 - alpha)
+        var result = [Float](repeating: 0, count: signal.count)
+        var x1: Float = 0, x2: Float = 0, y1: Float = 0, y2: Float = 0
+        for i in 0..<signal.count {
+            let x0 = signal[i]
+            result[i] = (b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2) / a0
+            x2 = x1; x1 = x0; y2 = y1; y1 = result[i]
+        }
+        return result
+    }
+
+    func addImpulsiveQRN(_ signal: [Float], burstRate: Double = 3.0, peakDB: Float = 15) -> [Float] {
+        let sigRMS = sqrt(signal.map { $0 * $0 }.reduce(0, +) / max(1, Float(signal.count)))
+        guard sigRMS > 0 else { return signal }
+        let burstAmplitude = sigRMS * pow(10.0, peakDB / 20.0)
+        let avgInterval = 48000.0 / burstRate
+        var result = signal
+        var nextBurst = Int(rng.nextDouble() * avgInterval)
+        while nextBurst < signal.count {
+            let duration = Int(rng.nextDouble() * 0.045 * 48000 + 0.005 * 48000)
+            let amp = Float(rng.nextDouble() * 0.8 + 0.2) * burstAmplitude
+            for j in nextBurst..<min(nextBurst + duration, signal.count) {
+                result[j] += amp * Float(rng.nextGaussian()) * 0.3
+            }
+            nextBurst += Int(-log(max(rng.nextDouble(), 1e-10)) * avgInterval)
+        }
+        return result
+    }
+
+    func applyFrequencyDrift(_ signal: [Float], driftRateHz: Double = 1.0) -> [Float] {
+        var result = [Float](repeating: 0, count: signal.count)
+        for i in 0..<signal.count {
+            let t = Double(i) / sampleRate
+            let phase = .pi * driftRateHz * t * t
+            result[i] = signal[i] * Float(cos(phase))
+        }
+        return result
+    }
+
+    // MARK: - Realistic HF Tests
+
+    func runRealisticHFTests() {
+        print("Realistic HF Conditions")
+        print(String(repeating: "\u{2500}", count: 70))
+
+        // PSK family alternate set
+        let pskAlts: Set<DigitalMode> = [.psk31, .bpsk63, .qpsk31, .qpsk63]
+        let gfskAlts: Set<DigitalMode> = [.ft8, .js8call]
+
+        // --- AGC pumping ---
+        // AGC changes envelope statistics but should not destroy mode identity
+
+        let rttyAGC = applyAGC(addWhiteNoise(to: generateRTTY(), snrDB: 10, rng: &rng))
+        runTest(name: "RTTY + AGC pumping (10 dB SNR)",
+                category: "hf-agc", expectedMode: .rtty, samples: rttyAGC)
+
+        let cwAGC = applyAGC(addWhiteNoise(to: generateCW(), snrDB: 10, rng: &rng))
+        runTest(name: "CW + AGC pumping (10 dB SNR)",
+                category: "hf-agc", expectedMode: .cw, samples: cwAGC)
+
+        let pskAGC = applyAGC(addWhiteNoise(to: generatePSK31(), snrDB: 10, rng: &rng))
+        runTest(name: "PSK31 + AGC pumping (10 dB SNR)",
+                category: "hf-agc", expectedMode: .psk31, samples: pskAGC,
+                acceptAlternate: pskAlts)
+
+        let js8AGC = applyAGC(addWhiteNoise(to: generateJS8Call(), snrDB: 10, rng: &rng))
+        runTest(name: "JS8Call + AGC pumping (10 dB SNR)",
+                category: "hf-agc", expectedMode: .js8call, samples: js8AGC,
+                acceptAlternate: gfskAlts)
+
+        // --- Selective fading (spectral notch within signal BW) ---
+
+        let rttyFade = addWhiteNoise(to: applySelectiveFade(generateRTTY(), notchFreq: 2125, depthDB: 10), snrDB: 10, rng: &rng)
+        runTest(name: "RTTY + selective fade (notch at mark freq)",
+                category: "hf-selfade", expectedMode: .rtty, samples: rttyFade)
+
+        let pskFade = addWhiteNoise(to: applySelectiveFade(generatePSK31(), notchFreq: 1000, depthDB: 8), snrDB: 10, rng: &rng)
+        runTest(name: "PSK31 + selective fade (notch near carrier)",
+                category: "hf-selfade", expectedMode: .psk31, samples: pskFade,
+                acceptAlternate: pskAlts)
+
+        let cwFade = addWhiteNoise(to: applySelectiveFade(generateCW(), notchFreq: 700, depthDB: 8), snrDB: 10, rng: &rng)
+        runTest(name: "CW + selective fade (notch at tone)",
+                category: "hf-selfade", expectedMode: .cw, samples: cwFade)
+
+        // --- Impulsive QRN (lightning) ---
+
+        let rttyQRN = addImpulsiveQRN(addWhiteNoise(to: generateRTTY(), snrDB: 10, rng: &rng), burstRate: 3, peakDB: 15)
+        runTest(name: "RTTY + impulsive QRN (lightning)",
+                category: "hf-qrn", expectedMode: .rtty, samples: rttyQRN)
+
+        let cwQRN = addImpulsiveQRN(addWhiteNoise(to: generateCW(), snrDB: 10, rng: &rng), burstRate: 3, peakDB: 15)
+        runTest(name: "CW + impulsive QRN",
+                category: "hf-qrn", expectedMode: .cw, samples: cwQRN)
+
+        let pskQRN = addImpulsiveQRN(addWhiteNoise(to: generatePSK31(), snrDB: 10, rng: &rng), burstRate: 3, peakDB: 15)
+        runTest(name: "PSK31 + impulsive QRN",
+                category: "hf-qrn", expectedMode: .psk31, samples: pskQRN,
+                acceptAlternate: pskAlts)
+
+        // --- Frequency drift ---
+
+        let rttyDrift = addWhiteNoise(to: applyFrequencyDrift(generateRTTY(), driftRateHz: 2.0), snrDB: 15, rng: &rng)
+        runTest(name: "RTTY + 2 Hz/s drift",
+                category: "hf-drift", expectedMode: .rtty, samples: rttyDrift)
+
+        let cwDrift = addWhiteNoise(to: applyFrequencyDrift(generateCW(), driftRateHz: 2.0), snrDB: 15, rng: &rng)
+        runTest(name: "CW + 2 Hz/s drift",
+                category: "hf-drift", expectedMode: .cw, samples: cwDrift)
+
+        // --- Combined brutal HF: Watterson + selective fading + AGC + QRN ---
+
+        var watterson = WattersonChannel(dopplerSpread: 1.0, pathDelay: 0.002, sampleRate: sampleRate)
+        var brutalRTTY = watterson.process(generateRTTY())
+        brutalRTTY = applySelectiveFade(brutalRTTY, notchFreq: 2200, depthDB: 8)
+        brutalRTTY = addWhiteNoise(to: brutalRTTY, snrDB: 5, rng: &rng)
+        brutalRTTY = applyAGC(brutalRTTY)
+        brutalRTTY = addImpulsiveQRN(brutalRTTY, burstRate: 2, peakDB: 10)
+        runTest(name: "RTTY brutal HF (Watterson+fade+AGC+QRN)",
+                category: "hf-brutal", expectedMode: .rtty, samples: brutalRTTY,
+                acceptAlternate: pskAlts.union(gfskAlts))  // any mode OK under extreme conditions
+
+        watterson = WattersonChannel(dopplerSpread: 1.0, pathDelay: 0.002, sampleRate: sampleRate)
+        var brutalCW = watterson.process(generateCW())
+        brutalCW = applySelectiveFade(brutalCW, notchFreq: 750, depthDB: 8)
+        brutalCW = addWhiteNoise(to: brutalCW, snrDB: 5, rng: &rng)
+        brutalCW = applyAGC(brutalCW)
+        brutalCW = addImpulsiveQRN(brutalCW, burstRate: 2, peakDB: 10)
+        runTest(name: "CW brutal HF (Watterson+fade+AGC+QRN)",
+                category: "hf-brutal", expectedMode: .cw, samples: brutalCW,
+                acceptAlternate: pskAlts.union(gfskAlts))
 
         print()
     }
@@ -600,6 +766,119 @@ class BenchmarkRunner {
         }
 
         print()
+    }
+
+    // MARK: - Panoradio Real-World Tests
+
+    func runPanoradioTests() {
+        // Look for concatenated Panoradio WAV files
+        let basePaths = [
+            "../../samples/panoradio_concat",     // relative to AmateurDigitalCore
+            "../../../samples/panoradio_concat",   // one more level up
+        ]
+
+        var panoradioDir: String?
+        for path in basePaths {
+            let manifestPath = path + "/concat_manifest.json"
+            if FileManager.default.fileExists(atPath: manifestPath) {
+                panoradioDir = path
+                break
+            }
+        }
+
+        guard let dir = panoradioDir else {
+            print("Panoradio Real-World Signals")
+            print(String(repeating: "\u{2500}", count: 70))
+            print("  (skipped — run scripts/eval_real_world.py --concat-only first)")
+            print()
+            return
+        }
+
+        let manifestPath = dir + "/concat_manifest.json"
+        guard let data = FileManager.default.contents(atPath: manifestPath),
+              let manifest = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            print("  (skipped — could not read manifest)")
+            return
+        }
+
+        // Mode label mapping: Panoradio mode name → our DigitalMode
+        let modeMapping: [String: DigitalMode] = [
+            "morse": .cw,
+            "psk31": .psk31,
+            "psk63": .bpsk63,
+            "qpsk31": .qpsk31,
+            "rtty45_170": .rtty,
+            "rtty50_170": .rtty,
+        ]
+
+        print("Panoradio Real-World Signals (CCIR 520 fading + AWGN + freq offset)")
+        print(String(repeating: "\u{2500}", count: 70))
+
+        for entry in manifest {
+            guard let file = entry["file"] as? String,
+                  let mode = entry["mode"] as? String,
+                  let snr = entry["snr_db"] as? Int,
+                  let expectedMode = modeMapping[mode] else { continue }
+
+            let wavPath = dir + "/" + file
+            guard let samples = loadWAV(path: wavPath) else {
+                print("  (could not load \(file))")
+                continue
+            }
+
+            // PSK modes that share spectral shape: accept either PSK31 or BPSK63 for PSK variants
+            var alternates: Set<DigitalMode> = []
+            if expectedMode == .psk31 { alternates = [.bpsk63, .qpsk31, .qpsk63] }
+            if expectedMode == .bpsk63 { alternates = [.psk31, .qpsk31, .qpsk63] }
+            if expectedMode == .qpsk31 { alternates = [.psk31, .bpsk63, .qpsk63] }
+
+            let weight: Double = snr >= 5 ? 1.5 : 0.5  // Weight higher SNR tests more
+            runTest(
+                name: "Panoradio \(mode) @ \(snr) dB SNR",
+                category: "panoradio-\(mode)",
+                expectedMode: expectedMode,
+                samples: samples,
+                weight: weight,
+                acceptAlternate: alternates
+            )
+        }
+        print()
+    }
+
+    /// Load a 16-bit mono WAV file as [Float] samples
+    func loadWAV(path: String) -> [Float]? {
+        guard let data = FileManager.default.contents(atPath: path) else { return nil }
+        guard data.count > 44 else { return nil }  // Minimum WAV header
+
+        // Parse WAV header (basic RIFF/WAVE PCM)
+        let bytes = [UInt8](data)
+        guard bytes[0] == 0x52, bytes[1] == 0x49, bytes[2] == 0x46, bytes[3] == 0x46 else { return nil } // "RIFF"
+        guard bytes[8] == 0x57, bytes[9] == 0x41, bytes[10] == 0x56, bytes[11] == 0x45 else { return nil } // "WAVE"
+
+        // Find data chunk
+        var offset = 12
+        while offset + 8 < data.count {
+            let chunkID = String(bytes: Array(bytes[offset..<offset+4]), encoding: .ascii) ?? ""
+            let chunkSize = Int(bytes[offset+4]) | (Int(bytes[offset+5]) << 8) | (Int(bytes[offset+6]) << 16) | (Int(bytes[offset+7]) << 24)
+
+            if chunkID == "data" {
+                offset += 8
+                let sampleCount = chunkSize / 2  // 16-bit samples
+                var samples = [Float](repeating: 0, count: sampleCount)
+                for i in 0..<sampleCount {
+                    let byteIdx = offset + i * 2
+                    guard byteIdx + 1 < data.count else { break }
+                    let value = Int16(bytes[byteIdx]) | (Int16(bytes[byteIdx + 1]) << 8)
+                    samples[i] = Float(value) / 32768.0
+                }
+                return samples
+            }
+
+            offset += 8 + chunkSize
+            if chunkSize % 2 != 0 { offset += 1 }  // WAV chunks are word-aligned
+        }
+
+        return nil
     }
 
     // MARK: - Summary

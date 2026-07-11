@@ -45,12 +45,13 @@ try:
 except ImportError:
     HAS_COREML = False
 
-MODE_LABELS = ["rtty", "psk31", "bpsk63", "qpsk31", "qpsk63", "cw", "js8call", "noise"]
+MODE_LABELS = ["rtty", "psk31", "bpsk63", "qpsk31", "qpsk63", "cw", "js8call", "ft8", "noise"]
 
 FEATURE_NAMES = [
     "bandwidth", "flatness", "num_peaks", "top_peak_power", "top_peak_bw",
     "fsk_pairs", "fsk_valley_pairs", "envelope_cv", "duty_cycle",
-    "transition_rate", "has_ook", "baud_rate", "baud_confidence"
+    "transition_rate", "has_ook", "baud_rate", "baud_confidence",
+    "costas_score", "costas_mode"
 ]
 
 def load_training_csv(path):
@@ -62,6 +63,10 @@ def load_training_csv(path):
             mode = row["mode"].lower()
             if mode not in MODE_LABELS:
                 continue
+            # Map costasMode string to numeric: "ft8"->1, "js8call"->2, else 0
+            costas_mode_str = row.get("costasMode", "none").lower()
+            costas_mode_val = {"ft8": 1.0, "js8call": 2.0}.get(costas_mode_str, 0.0)
+
             features = [
                 float(row["bw"]),
                 float(row["flatness"]),
@@ -76,6 +81,8 @@ def load_training_csv(path):
                 1.0 if row["ook"] == "true" else 0.0,
                 float(row.get("baudRate", 0)),
                 float(row.get("baudConf", 0)),
+                float(row.get("costasScore", 0)),
+                costas_mode_val,
             ]
             X.append(features)
             y.append(mode)

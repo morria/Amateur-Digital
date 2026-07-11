@@ -92,6 +92,107 @@ func applyFade(to signal: [Float], rate: Double, depth: Float, sr: Double = 4800
     return result
 }
 
+// MARK: - Realistic HF Impairments
+
+/// Simulates receiver AGC pumping: gain varies inversely with signal envelope.
+/// Attack ~50ms, decay ~200ms. Creates 10-20 dB level swings on CW/RTTY.
+func applyAGC(to signal: [Float], attackMs: Double = 50, decayMs: Double = 200, targetLevel: Float = 0.3) -> [Float] {
+    let attackAlpha = Float(1.0 - exp(-1.0 / (attackMs * 48.0)))  // per-sample
+    let decayAlpha = Float(1.0 - exp(-1.0 / (decayMs * 48.0)))
+    var envelope: Float = targetLevel
+    var result = [Float](repeating: 0, count: signal.count)
+    for i in 0..<signal.count {
+        let mag = abs(signal[i])
+        let alpha = mag > envelope ? attackAlpha : decayAlpha
+        envelope += alpha * (mag - envelope)
+        let gain = envelope > 1e-6 ? targetLevel / envelope : 1.0
+        result[i] = signal[i] * min(gain, 10.0)  // cap at 20 dB gain
+    }
+    return result
+}
+
+/// Simulates selective fading: applies a narrow spectral notch at a random frequency
+/// within the signal bandwidth. Real HF multipath creates these.
+func applySelectiveFade(to signal: [Float], notchFreq: Double, notchBW: Double = 50, depthDB: Float = 12, sr: Double = 48000) -> [Float] {
+    // 2nd-order IIR notch filter
+    let w0 = 2.0 * .pi * notchFreq / sr
+    let Q = notchFreq / max(notchBW, 1)
+    let alpha = sin(w0) / (2.0 * Q)
+    let depth = pow(10.0, Double(-depthDB) / 20.0)
+    let b0 = Float(1.0 - alpha * (1.0 - depth))
+    let b1 = Float(-2.0 * cos(w0))
+    let b2 = Float(1.0 + alpha * (1.0 - depth))
+    let a0 = Float(1.0 + alpha)
+    let a1 = Float(-2.0 * cos(w0))
+    let a2 = Float(1.0 - alpha)
+
+    var result = [Float](repeating: 0, count: signal.count)
+    var x1: Float = 0, x2: Float = 0, y1: Float = 0, y2: Float = 0
+    for i in 0..<signal.count {
+        let x0 = signal[i]
+        result[i] = (b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2) / a0
+        x2 = x1; x1 = x0; y2 = y1; y1 = result[i]
+    }
+    return result
+}
+
+/// Simulates impulsive QRN (lightning/switching noise). Poisson-timed bursts
+/// with heavy-tailed amplitude, 5-50ms duration.
+func addImpulsiveQRN(to signal: [Float], burstRate: Double = 3.0, peakDB: Float = 15, rng: inout SeededRandom) -> [Float] {
+    let sigRMS = sqrt(signal.map { $0 * $0 }.reduce(0, +) / max(1, Float(signal.count)))
+    guard sigRMS > 0 else { return signal }
+    let burstAmplitude = sigRMS * pow(10.0, peakDB / 20.0)
+    var result = signal
+    let avgInterval = 48000.0 / burstRate  // samples between bursts
+    var nextBurst = Int(rng.nextDouble() * avgInterval)
+    while nextBurst < signal.count {
+        let duration = Int(rng.nextDouble() * 0.045 * 48000 + 0.005 * 48000)  // 5-50 ms
+        let amp = Float(rng.nextDouble() * 0.8 + 0.2) * burstAmplitude
+        for j in nextBurst..<min(nextBurst + duration, signal.count) {
+            result[j] += amp * Float(rng.nextGaussian()) * 0.3
+        }
+        nextBurst += Int(-log(max(rng.nextDouble(), 1e-10)) * avgInterval)  // exponential inter-arrival
+    }
+    return result
+}
+
+/// Adds adjacent-channel interference: another digital signal at a different frequency.
+func addAdjacentSignal(to signal: [Float], interferer: [Float], offsetHz: Double = 500, levelDB: Float = -10, sr: Double = 48000) -> [Float] {
+    let scale = pow(10.0, levelDB / 20.0)
+    let shifted = applyOffset(to: interferer, hz: offsetHz, sr: sr)
+    var result = signal
+    for i in 0..<min(signal.count, shifted.count) {
+        result[i] += shifted[i] * scale
+    }
+    return result
+}
+
+/// Simulates slow frequency drift (oscillator instability). Typical: 0.5-2 Hz/sec on HF.
+func applyFrequencyDrift(to signal: [Float], driftRateHz: Double = 1.0, sr: Double = 48000) -> [Float] {
+    var result = [Float](repeating: 0, count: signal.count)
+    for i in 0..<signal.count {
+        let t = Double(i) / sr
+        // Drift creates a time-varying phase: integral of drift rate gives quadratic phase
+        let phase = .pi * driftRateHz * t * t
+        result[i] = signal[i] * Float(cos(phase))
+    }
+    return result
+}
+
+/// Simulates phase noise: random jitter on the carrier phase, broadens spectral lines.
+func applyPhaseNoise(to signal: [Float], noiseFloorDBcHz: Double = -80, sr: Double = 48000, rng: inout SeededRandom) -> [Float] {
+    // Simple random walk phase noise
+    let variance = pow(10.0, noiseFloorDBcHz / 10.0) * sr
+    let stepStd = sqrt(variance / sr)
+    var phase: Double = 0
+    var result = [Float](repeating: 0, count: signal.count)
+    for i in 0..<signal.count {
+        phase += rng.nextGaussian() * stepStd
+        result[i] = signal[i] * Float(cos(phase))
+    }
+    return result
+}
+
 // MARK: - Signal Generators
 
 let sampleRate: Double = 48000
@@ -151,6 +252,37 @@ func genCW(text: String, freq: Double = 700, wpm: Double = 20) -> [Float] {
 func genJS8(text: String, freq: Double = 1000) -> [Float] {
     var mod = JS8CallModulator(configuration: JS8CallConfiguration(carrierFrequency: freq, sampleRate: sampleRate))
     return pad(mod.modulateTextWithEnvelope(text, preambleMs: 100, postambleMs: 200))
+}
+
+func genFT8(text: String, freq: Double = 1500) -> [Float] {
+    // FT8 uses the same 8-GFSK as JS8Call but with FT8 Costas arrays and 1500 Hz default carrier
+    let ft8Config = GFSKConfig(
+        sampleRate: sampleRate,
+        internalRate: 12000.0,
+        toneSpacing: 6.25,
+        samplesPerSymbol: 1920,
+        costasArrays: .ft8,
+        carrierFrequency: freq
+    )
+    var mod = GFSKModulator(config: ft8Config)
+    // Generate random 174-bit codeword (FT8 message content doesn't matter for classification)
+    let codeword = (0..<174).map { _ in UInt8.random(in: 0...1) }
+    let symbols = mod.mapCodewordToSymbols(codeword)
+    let audio = mod.generateAudio(symbols: symbols)
+
+    // Add envelope shaping (raised cosine ramp)
+    let rampSamples = Int(0.005 * sampleRate)
+    var shaped = audio
+    for i in 0..<min(rampSamples, shaped.count) {
+        let t = Float(i) / Float(rampSamples)
+        shaped[i] *= 0.5 * (1 - cos(.pi * t))
+    }
+    for i in 0..<min(rampSamples, shaped.count) {
+        let idx = shaped.count - 1 - i
+        let t = Float(i) / Float(rampSamples)
+        shaped[idx] *= 0.5 * (1 - cos(.pi * t))
+    }
+    return pad(shaped)
 }
 
 func genNoise(rng: inout SeededRandom) -> [Float] {
@@ -336,6 +468,129 @@ func buildSpecs() -> [SampleSpec] {
             return addNoise(to: ch.process(genJS8(text: hamTexts[Int(rng.nextDouble() * Double(hamTexts.count)) % hamTexts.count])), snrDB: 10, rng: &rng)
         })
     }
+
+    // FT8 — same GFSK modulation as JS8Call but with FT8 Costas arrays
+    for freq in [1000.0, 1500.0, 2000.0, 2500.0] {
+        specs.append(SampleSpec(mode: "ft8", condition: "clean-\(Int(freq))Hz") { rng in
+            genFT8(text: "", freq: freq)
+        })
+    }
+    for snr in snrs {
+        specs.append(SampleSpec(mode: "ft8", condition: "snr\(Int(snr))") { rng in
+            addNoise(to: genFT8(text: ""), snrDB: snr, rng: &rng)
+        })
+    }
+    for (name, spread, delay) in ituChannels {
+        specs.append(SampleSpec(mode: "ft8", condition: "itu-\(name)") { rng in
+            var ch = WattersonChannel(dopplerSpread: spread, pathDelay: delay, sampleRate: sampleRate)
+            return addNoise(to: ch.process(genFT8(text: "")), snrDB: 10, rng: &rng)
+        })
+    }
+
+    // =========================================================================
+    // Realistic HF impairments — applied across all modes
+    // =========================================================================
+
+    // Helper to pick a random ham text
+    func randText(_ rng: inout SeededRandom) -> String {
+        hamTexts[Int(rng.nextDouble() * Double(hamTexts.count)) % hamTexts.count]
+    }
+
+    // Mode generators for impairment application
+    let modeGens: [(mode: String, gen: (inout SeededRandom) -> [Float])] = [
+        ("rtty",    { rng in genRTTY(text: randText(&rng)) }),
+        ("psk31",   { rng in genPSK31(text: randText(&rng)) }),
+        ("bpsk63",  { rng in genBPSK63(text: randText(&rng)) }),
+        ("cw",      { rng in genCW(text: randText(&rng)) }),
+        ("js8call", { rng in genJS8(text: randText(&rng)) }),
+        ("ft8",     { rng in genFT8(text: "") }),
+    ]
+
+    for (mode, gen) in modeGens {
+        // AGC pumping (fast attack, slow decay — receiver behavior on CW/RTTY)
+        specs.append(SampleSpec(mode: mode, condition: "agc-fast") { rng in
+            let sig = addNoise(to: gen(&rng), snrDB: 10, rng: &rng)
+            return applyAGC(to: sig, attackMs: 20, decayMs: 150)
+        })
+        specs.append(SampleSpec(mode: mode, condition: "agc-slow") { rng in
+            let sig = addNoise(to: gen(&rng), snrDB: 10, rng: &rng)
+            return applyAGC(to: sig, attackMs: 100, decayMs: 500)
+        })
+
+        // Selective fading (spectral notch within signal BW)
+        for depthDB: Float in [6, 12] {
+            specs.append(SampleSpec(mode: mode, condition: "selfade-\(Int(depthDB))dB") { rng in
+                let sig = gen(&rng)
+                let notchFreq = 800 + rng.nextDouble() * 1400  // 800-2200 Hz
+                return addNoise(to: applySelectiveFade(to: sig, notchFreq: notchFreq, depthDB: depthDB), snrDB: 10, rng: &rng)
+            })
+        }
+
+        // Impulsive QRN (lightning crashes)
+        specs.append(SampleSpec(mode: mode, condition: "qrn-light") { rng in
+            addImpulsiveQRN(to: addNoise(to: gen(&rng), snrDB: 10, rng: &rng), burstRate: 2, peakDB: 10, rng: &rng)
+        })
+        specs.append(SampleSpec(mode: mode, condition: "qrn-heavy") { rng in
+            addImpulsiveQRN(to: addNoise(to: gen(&rng), snrDB: 5, rng: &rng), burstRate: 5, peakDB: 20, rng: &rng)
+        })
+
+        // Frequency drift (oscillator instability)
+        specs.append(SampleSpec(mode: mode, condition: "drift-1Hz") { rng in
+            addNoise(to: applyFrequencyDrift(to: gen(&rng), driftRateHz: 1.0), snrDB: 15, rng: &rng)
+        })
+        specs.append(SampleSpec(mode: mode, condition: "drift-3Hz") { rng in
+            addNoise(to: applyFrequencyDrift(to: gen(&rng), driftRateHz: 3.0), snrDB: 15, rng: &rng)
+        })
+
+        // Phase noise (oscillator jitter broadens spectral lines)
+        specs.append(SampleSpec(mode: mode, condition: "phasenoise") { rng in
+            addNoise(to: applyPhaseNoise(to: gen(&rng), noiseFloorDBcHz: -70, rng: &rng), snrDB: 15, rng: &rng)
+        })
+
+        // Combined: AGC + selective fading + noise (realistic worst-case HF)
+        specs.append(SampleSpec(mode: mode, condition: "hf-brutal") { rng in
+            var sig = gen(&rng)
+            var ch = WattersonChannel(dopplerSpread: 1.0, pathDelay: 0.002, sampleRate: sampleRate)
+            sig = ch.process(sig)
+            let notchFreq = 800 + rng.nextDouble() * 1400
+            sig = applySelectiveFade(to: sig, notchFreq: notchFreq, depthDB: 10)
+            sig = addNoise(to: sig, snrDB: 5, rng: &rng)
+            sig = applyAGC(to: sig, attackMs: 50, decayMs: 200)
+            sig = addImpulsiveQRN(to: sig, burstRate: 2, peakDB: 12, rng: &rng)
+            return sig
+        })
+    }
+
+    // Adjacent-channel QRM — signal + different mode at nearby frequency
+    specs.append(SampleSpec(mode: "rtty", condition: "qrm-psk") { rng in
+        let sig = addNoise(to: genRTTY(text: randText(&rng)), snrDB: 15, rng: &rng)
+        let qrm = genPSK31(text: randText(&rng), freq: 1500)
+        return addAdjacentSignal(to: sig, interferer: qrm, offsetHz: 0, levelDB: -6)
+    })
+    specs.append(SampleSpec(mode: "psk31", condition: "qrm-rtty") { rng in
+        let sig = addNoise(to: genPSK31(text: randText(&rng)), snrDB: 15, rng: &rng)
+        let qrm = genRTTY(text: randText(&rng), freq: 2125)
+        return addAdjacentSignal(to: sig, interferer: qrm, offsetHz: 0, levelDB: -6)
+    })
+    specs.append(SampleSpec(mode: "cw", condition: "qrm-cw") { rng in
+        let sig = addNoise(to: genCW(text: randText(&rng)), snrDB: 15, rng: &rng)
+        let qrm = genCW(text: randText(&rng), freq: 850)  // nearby CW station
+        return addAdjacentSignal(to: sig, interferer: qrm, offsetHz: 0, levelDB: -3)
+    })
+    specs.append(SampleSpec(mode: "ft8", condition: "qrm-ft8") { rng in
+        // Multiple FT8 signals at different frequencies (typical on 20m)
+        var sig = addNoise(to: genFT8(text: "", freq: 1500), snrDB: 15, rng: &rng)
+        for qrmFreq in [1000.0, 1200.0, 1800.0, 2000.0] {
+            let qrm = genFT8(text: "", freq: qrmFreq)
+            sig = addAdjacentSignal(to: sig, interferer: qrm, offsetHz: 0, levelDB: -10)
+        }
+        return sig
+    })
+
+    // Noise with QRN (impulsive noise should still be classified as noise)
+    specs.append(SampleSpec(mode: "noise", condition: "qrn-crashes") { rng in
+        addImpulsiveQRN(to: genNoise(rng: &rng), burstRate: 4, peakDB: 20, rng: &rng)
+    })
 
     // Noise
     specs.append(SampleSpec(mode: "noise", condition: "silence") { _ in

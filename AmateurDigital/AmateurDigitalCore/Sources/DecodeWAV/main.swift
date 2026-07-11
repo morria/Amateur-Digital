@@ -645,7 +645,7 @@ func printUsage() {
     Usage: DecodeWAV <file.wav> [options]
 
     Options:
-      --mode rtty|psk    Force decode mode (default: auto-detect)
+      --mode rtty|psk|cw Force decode mode (default: auto-detect RTTY/PSK)
       --shift <Hz>       RTTY shift in Hz (default: 170)
       --baud <rate>      RTTY baud rate (default: 45.45)
       --verbose, -v      Show scan details and spectrum
@@ -699,8 +699,8 @@ guard let path = wavPath else {
     exit(1)
 }
 
-if let m = forcedMode, m != "rtty" && m != "psk" {
-    fputs("Error: unknown mode '\(m)' (use rtty or psk)\n", stderr)
+if let m = forcedMode, m != "rtty" && m != "psk" && m != "cw" {
+    fputs("Error: unknown mode '\(m)' (use rtty, psk, or cw)\n", stderr)
     exit(1)
 }
 
@@ -719,6 +719,58 @@ let duration = Double(samples.count) / sampleRate
 let formatName = bits == 32 ? "float32" : "int\(bits)"
 print("  \(formatName), \(channels)ch, \(Int(sampleRate)) Hz, \(String(format: "%.1f", duration))s (\(samples.count.formatted()) samples)")
 print("  Read in \(elapsed(t0))")
+
+// CW mode: single-tone Goertzel sweep + CWDemodulator, then exit.
+if forcedMode == "cw" {
+    final class CWCollector: CWDemodulatorDelegate {
+        var text = ""
+        func demodulator(_ demodulator: CWDemodulator, didDecode character: Character, atFrequency frequency: Double) {
+            text.append(character)
+        }
+        func demodulator(_ demodulator: CWDemodulator, signalDetected detected: Bool, atFrequency frequency: Double) {}
+    }
+
+    print("\nDetecting CW tone...", terminator: "")
+    fflush(stdout)
+    let tTone = now()
+    let window = Array(samples.prefix(Int(sampleRate * 5)))
+    let toneBlock = Int(sampleRate * 0.05)
+    var bestFreq = 700.0
+    var bestPower: Float = 0
+    var freq = 300.0
+    while freq <= 1200.0 {
+        var filter = GoertzelFilter(frequency: freq, sampleRate: sampleRate, blockSize: toneBlock)
+        var total: Float = 0
+        var index = 0
+        while index + toneBlock <= window.count {
+            total += filter.processBlock(Array(window[index..<index + toneBlock]))
+            index += toneBlock
+        }
+        if total > bestPower {
+            bestPower = total
+            bestFreq = freq
+        }
+        freq += 10
+    }
+    print(" \(Int(bestFreq)) Hz (\(elapsed(tTone)))")
+
+    let config = CWConfiguration(toneFrequency: bestFreq, wpm: 20, sampleRate: sampleRate)
+    let demod = CWDemodulator(configuration: config)
+    let collector = CWCollector()
+    demod.delegate = collector
+
+    print("Decoding CW...", terminator: "")
+    fflush(stdout)
+    let tDecode = now()
+    demod.process(samples: samples)
+    print(" done (\(elapsed(tDecode)))")
+
+    print("\n\(bar)")
+    print("CW @ \(Int(demod.toneFrequency)) Hz, ~\(Int(demod.estimatedWPM)) WPM")
+    print(bar)
+    print(collector.text.isEmpty ? "(no copy)" : collector.text)
+    exit(0)
+}
 
 // 2. FFT spectrum analysis
 print("\nScanning spectrum...", terminator: "")

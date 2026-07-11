@@ -299,6 +299,15 @@ class ChatViewModel: ObservableObject {
             // If ML classifier is available, use it to re-rank based on trained GBM
             if let ml = ml {
                 let features = result.features
+                // Map costasMode to numeric: ft8=1, js8call=2, else 0
+                let costasModeVal: Double = {
+                    switch features.costasMode {
+                    case "ft8": return 1.0
+                    case "js8call": return 2.0
+                    default: return 0.0
+                    }
+                }()
+
                 let featureDict: [String: Double] = [
                     "bandwidth": features.occupiedBandwidth,
                     "flatness": Double(features.spectralFlatness),
@@ -313,20 +322,26 @@ class ChatViewModel: ObservableObject {
                     "has_ook": features.envelopeStats.hasOnOffKeying ? 1.0 : 0.0,
                     "baud_rate": features.estimatedBaudRate,
                     "baud_confidence": Double(features.baudRateConfidence),
+                    "costas_score": Double(features.costasScore),
+                    "costas_mode": costasModeVal,
                 ]
 
                 let mlResult = ml.classify(features: featureDict)
 
-                // Re-rank: build new ModeScore array from ML probabilities
+                // Re-rank: blend ML probabilities (70%) with hand-tuned scores (30%).
+                // GBM now natively outputs FT8 as a class — no splitting needed.
                 if !mlResult.probabilities.isEmpty {
+                    let mlProbs = Dictionary(mlResult.probabilities.map { ($0.mode, $0.probability) },
+                                             uniquingKeysWith: { a, _ in a })
+
                     var newRankings: [ModeScore] = []
-                    for (mode, prob) in mlResult.probabilities {
-                        // Find the matching DigitalMode from the existing rankings
-                        if let existing = result.rankings.first(where: { $0.mode.rawValue.lowercased() == mode }) {
+                    for existing in result.rankings {
+                        let modeKey = existing.mode.rawValue.lowercased()
+                        if let prob = mlProbs[modeKey] {
                             let mlEvidence = Evidence(
                                 label: "ML classifier",
                                 impact: Float(prob),
-                                detail: "GBM model trained on 5800 signals: \(Int(prob * 100))% confidence"
+                                detail: "GBM model: \(Int(prob * 100))% confidence"
                             )
                             var evidence = existing.evidence
                             evidence.insert(mlEvidence, at: 0)
@@ -335,14 +350,11 @@ class ChatViewModel: ObservableObject {
                             newRankings.append(ModeScore(
                                 mode: existing.mode,
                                 confidence: blended,
-                                explanation: "ML: \(mode) \(Int(prob * 100))%. \(existing.explanation)",
+                                explanation: "ML: \(modeKey) \(Int(prob * 100))%. \(existing.explanation)",
                                 evidence: evidence
                             ))
-                        }
-                    }
-                    // Add any modes not in ML output
-                    for existing in result.rankings {
-                        if !newRankings.contains(where: { $0.mode == existing.mode }) {
+                        } else {
+                            // Mode not in GBM output — use hand-tuned only
                             newRankings.append(existing)
                         }
                     }

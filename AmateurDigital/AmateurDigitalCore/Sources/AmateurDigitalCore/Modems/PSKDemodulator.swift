@@ -101,7 +101,7 @@ public final class PSKDemodulator {
     private var noisePower: Double = 0.001
     private var _signalDetected: Bool = false
     private var signalPersistCount: Int = 0         // consecutive symbols above detection threshold
-    private let signalPersistRequired: Int = 4      // must sustain for this many symbols to open squelch
+    public var signalPersistRequired: Int = 4      // must sustain for this many symbols to open squelch
 
     /// Phase quality metric (fldigi-style IMD approximation) — measures how close
     /// symbol phases are to expected constellation points. Real BPSK signals cluster
@@ -109,7 +109,8 @@ public final class PSKDemodulator {
     private var phaseQualityAccum: Double = 0
     private var phaseQualityCount: Int = 0
     private var phaseQualityTotalSymbols: Int = 0     // total symbols since signal detected
-    private let phaseQualityThreshold: Double = 0.70  // quality must exceed this to sustain
+    // MARK: - Tunable Parameters (for Optuna/CMA-ES optimization)
+    public var phaseQualityThreshold: Double = 0.70  // quality must exceed this to sustain
 
     // MARK: - Bandpass Filters
 
@@ -160,7 +161,7 @@ public final class PSKDemodulator {
     private let noiseTrackingSlow: Float = 0.001
 
     /// Multiplier for noise floor to get squelch level
-    private let squelchMultiplier: Float = 3.0
+    public var squelchMultiplier: Float = 3.0
 
     /// Adaptive squelch level (computed from noise floor)
     public var adaptiveSquelchLevel: Float {
@@ -227,14 +228,14 @@ public final class PSKDemodulator {
 
     /// AFC integral gain — fraction of measured offset corrected per averaging window.
     /// 0.5 = correct half the error each window (converges in ~3 windows).
-    private let afcIntegralGain: Double = 0.5
+    public var afcIntegralGain: Double = 0.5
 
     /// AFC integrator leak factor — prevents drift on clean channel.
     private let afcLeakFactor: Double = 0.999
 
     /// AFC dead zone — averaged error must exceed this to apply correction (radians).
     /// 0.08 rad ≈ 0.4 Hz at PSK31 — prevents clean-channel noise from drifting.
-    private let afcDeadZone: Double = 0.08
+    public var afcDeadZone: Double = 0.08
 
     /// Maximum AFC correction in Hz — prevents runaway
     private let afcMaxCorrectionHz: Double = 60.0
@@ -371,11 +372,22 @@ public final class PSKDemodulator {
     /// - Parameter sample: Input sample
     /// - Returns: Gain-adjusted sample
     private func applyAGC(_ sample: Float) -> Float {
+        // Instant gain clamp for very strong raw input (before AGC scaling).
+        // Handles high-amplitude signals (2×, 5×) that arrive before signal detection.
+        // Without this, strong signals overwhelm the phase detector during the
+        // 128ms detection window (AGC only runs after detection in normal mode).
+        let rawLevel = abs(sample)
+        if rawLevel > agcTarget * 2 {
+            let targetGain = agcTarget / rawLevel
+            if targetGain < agcGain {
+                agcGain = max(agcMinGain, targetGain)
+            }
+        }
+
         let output = sample * agcGain
         let level = abs(output)
 
-        // Only run AGC gain adjustment when signal is detected
-        // Otherwise, leave gain at 1.0 to avoid amplifying noise
+        // Normal AGC: only adjusts when signal is detected
         if _signalDetected {
             if level > agcTarget {
                 agcGain *= (1.0 - agcAttack)
